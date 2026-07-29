@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ExchangePairingCodeInputSchema,
+  ExchangePairingCodeResultSchema,
   ExtensionCredentialSchema,
   StartPairingResultSchema
 } from "./extension-auth";
@@ -32,6 +33,29 @@ describe("extension auth contracts", () => {
       ExtensionCredentialSchema.safeParse({
         token: "",
         expiresAt: "not-a-date"
+      }).success
+    ).toBe(false);
+  });
+
+  it("accepts a 32-byte base64url credential returned by exchange", () => {
+    const token = "A".repeat(42) + "_";
+
+    expect(
+      ExchangePairingCodeResultSchema.parse({
+        token,
+        expiresAt: "2026-08-28T18:00:00.000Z"
+      })
+    ).toEqual({
+      token,
+      expiresAt: "2026-08-28T18:00:00.000Z"
+    });
+  });
+
+  it("rejects credentials that are not 32-byte base64url tokens", () => {
+    expect(
+      ExtensionCredentialSchema.safeParse({
+        token: "A".repeat(42) + "=",
+        expiresAt: "2026-08-28T18:00:00.000Z"
       }).success
     ).toBe(false);
   });

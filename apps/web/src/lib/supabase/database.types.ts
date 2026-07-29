@@ -96,6 +96,33 @@ export type Database = {
           },
         ]
       }
+      extension_pairing_codes: {
+        Row: {
+          code_hash: string
+          created_at: string
+          expires_at: string
+          id: string
+          owner_user_id: string
+          used_at: string | null
+        }
+        Insert: {
+          code_hash: string
+          created_at?: string
+          expires_at: string
+          id?: string
+          owner_user_id: string
+          used_at?: string | null
+        }
+        Update: {
+          code_hash?: string
+          created_at?: string
+          expires_at?: string
+          id?: string
+          owner_user_id?: string
+          used_at?: string | null
+        }
+        Relationships: []
+      }
       extension_tokens: {
         Row: {
           created_at: string
@@ -368,6 +395,15 @@ export type Database = {
       assert_source_version_capture_limits: {
         Args: { checked_source_version_id: string }
         Returns: undefined
+      }
+      exchange_extension_pairing_code: {
+        Args: {
+          p_code_hash: string
+          p_label: string
+          p_token_expires_at: string
+          p_token_hash: string
+        }
+        Returns: Json
       }
       is_valid_attachment_manifest: {
         Args: { manifest: Json }

@@ -51,6 +51,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@recall/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@supabase/ssr':
         specifier: ^0.12.4
         version: 0.12.4(@supabase/supabase-js@2.111.0)

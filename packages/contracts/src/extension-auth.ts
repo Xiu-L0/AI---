@@ -17,7 +17,12 @@ export const ExchangePairingCodeInputSchema = z.object({
 });
 
 export const ExtensionCredentialSchema = z.object({
-  token: z.string().min(32).max(512),
+  token: z
+    .string()
+    .regex(
+      /^[A-Za-z0-9_-]{43}$/,
+      "extension token must be 32 random bytes encoded as base64url"
+    ),
   expiresAt: z.iso.datetime({ offset: true })
 });
 
