@@ -1,0 +1,2 @@
+-- Milestone A intentionally has no committed user or capture fixtures.
+-- Automated tests create synthetic rows inside transactions and roll them back.
