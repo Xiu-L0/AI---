@@ -45,6 +45,7 @@ export type Database = {
           id: string
           idempotency_key: string
           owner_user_id: string
+          result_source_version_id: string | null
           scope: Database["public"]["Enums"]["capture_scope"]
           sensitivity: Database["public"]["Enums"]["sensitivity_level"]
           source: Database["public"]["Enums"]["capture_source"]
@@ -62,6 +63,7 @@ export type Database = {
           id?: string
           idempotency_key: string
           owner_user_id: string
+          result_source_version_id?: string | null
           scope: Database["public"]["Enums"]["capture_scope"]
           sensitivity: Database["public"]["Enums"]["sensitivity_level"]
           source: Database["public"]["Enums"]["capture_source"]
@@ -79,6 +81,7 @@ export type Database = {
           id?: string
           idempotency_key?: string
           owner_user_id?: string
+          result_source_version_id?: string | null
           scope?: Database["public"]["Enums"]["capture_scope"]
           sensitivity?: Database["public"]["Enums"]["sensitivity_level"]
           source?: Database["public"]["Enums"]["capture_source"]
@@ -87,6 +90,13 @@ export type Database = {
           title?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "capture_sessions_result_version_item_owner_fk"
+            columns: ["result_source_version_id", "source_item_id", "owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "source_versions"
+            referencedColumns: ["id", "source_item_id", "owner_user_id"]
+          },
           {
             foreignKeyName: "capture_sessions_source_item_owner_fk"
             columns: ["source_item_id", "owner_user_id"]
@@ -402,6 +412,20 @@ export type Database = {
           p_label: string
           p_token_expires_at: string
           p_token_hash: string
+        }
+        Returns: Json
+      }
+      finalize_capture: {
+        Args: {
+          p_attachments: Json
+          p_capture_id: string
+          p_capture_status: Database["public"]["Enums"]["capture_completeness"]
+          p_content_fingerprint: string
+          p_idempotency_key: string
+          p_messages: Json
+          p_missing_elements: string[]
+          p_owner_user_id: string
+          p_raw_text: string
         }
         Returns: Json
       }

@@ -153,7 +153,7 @@ export const StartCaptureInputSchema = z
 export const UploadedAttachmentSchema = z.object({
   clientId: z.string().min(1).max(100),
   storagePath: z.string().min(1).max(2000),
-  etag: z.string().min(1).max(1000)
+  etag: z.string().min(1).max(1000).optional()
 });
 
 export const FinalizeCaptureInputSchema = z

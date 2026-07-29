@@ -38,6 +38,21 @@ function attachment(clientId: string, byteSize = 100) {
 }
 
 describe("capture contracts", () => {
+  it("allows the server to obtain attachment ETags from private storage", () => {
+    const result = FinalizeCaptureInputSchema.safeParse({
+      idempotencyKey: "capture-key-1",
+      completeness: "complete",
+      missingElements: [],
+      rawText: "",
+      messages: [],
+      uploadedAttachments: [
+        { clientId: "file-1", storagePath: "owner/capture/file-1.txt" }
+      ]
+    });
+
+    expect(result.success).toBe(true);
+  });
+
   it("rejects more than fifty attachments", () => {
     const attachments = Array.from({ length: 51 }, (_, index) =>
       attachment(`file-${index}`)
