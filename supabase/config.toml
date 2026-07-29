@@ -46,9 +46,11 @@ enabled = true
 site_url = "http://127.0.0.1:3000"
 additional_redirect_urls = ["http://127.0.0.1:3000/auth/confirm"]
 jwt_expiry = 3600
-enable_signup = true
+enable_signup = false
 
 [auth.email]
+# Email remains a login provider for the pre-created personal account.
+# The global auth.enable_signup switch above prevents public registration.
 enable_signup = true
 double_confirm_changes = true
 enable_confirmations = false
