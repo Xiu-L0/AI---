@@ -1,0 +1,11 @@
+node_modules/
+.next/
+.output/
+.wxt/
+coverage/
+playwright-report/
+test-results/
+.env*
+!.env.example
+supabase/.temp/
+work/
