@@ -32,6 +32,7 @@ const baseCapture = {
 class FakeCaptureStartRepository implements CaptureStartRepository {
   readonly sessions = new Map<string, CaptureStartSession>();
   readonly signedPaths: string[] = [];
+  readonly signedUploadOptions: Array<{ upsert: boolean }> = [];
   createCount = 0;
   failSigningAt: number | null = null;
   signedTokenGeneration = 0;
@@ -68,8 +69,12 @@ class FakeCaptureStartRepository implements CaptureStartRepository {
     return session;
   }
 
-  async createSignedUploadUrl(storagePath: string) {
+  async createSignedUploadUrl(
+    storagePath: string,
+    options: { upsert: boolean },
+  ) {
     this.signedPaths.push(storagePath);
+    this.signedUploadOptions.push(options);
     if (this.failSigningAt === this.signedPaths.length) {
       throw new Error("synthetic signing failure");
     }
@@ -168,6 +173,7 @@ describe("startCaptureWithRepository", () => {
       },
     ]);
     expect(repository.createCount).toBe(1);
+    expect(repository.signedUploadOptions).toEqual([{ upsert: false }]);
     expect(
       repository.sessions.get(`${OWNER_ID}:capture-key-1`)?.expiresAt,
     ).toBe("2026-07-29T22:00:00.000Z");
@@ -197,6 +203,10 @@ describe("startCaptureWithRepository", () => {
       first.uploadTargets[0]?.token,
     );
     expect(repository.createCount).toBe(1);
+    expect(repository.signedUploadOptions).toEqual([
+      { upsert: false },
+      { upsert: true },
+    ]);
   });
 
   it("marks the whole session failed when any signed URL fails", async () => {
@@ -238,6 +248,7 @@ describe("startCaptureWithRepository", () => {
 
     expect(result.captureId).toBe(CAPTURE_ID);
     expect(repository.createCount).toBe(1);
+    expect(repository.signedUploadOptions.at(-1)).toEqual({ upsert: true });
     expect(
       repository.sessions.get(`${OWNER_ID}:capture-key-1`)?.status,
     ).toBe("awaiting_upload");

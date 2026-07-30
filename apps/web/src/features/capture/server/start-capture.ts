@@ -60,6 +60,7 @@ export interface CaptureStartRepository {
   }): Promise<CaptureStartSession>;
   createSignedUploadUrl(
     storagePath: string,
+    options: { upsert: boolean },
   ): Promise<{ token: string }>;
   markCaptureSessionFailed(
     ownerUserId: string,
@@ -188,6 +189,7 @@ async function createUploadTargets(
   repository: CaptureStartRepository,
   ownerUserId: string,
   session: CaptureStartSession,
+  options: { upsert: boolean },
 ): Promise<StartCaptureResult> {
   const uploadTargets: StartCaptureResult["uploadTargets"] = [];
 
@@ -199,7 +201,7 @@ async function createUploadTargets(
         attachment,
       );
       const { token } =
-        await repository.createSignedUploadUrl(storagePath);
+        await repository.createSignedUploadUrl(storagePath, options);
       if (token.length === 0) {
         throw new Error("signed upload token is empty");
       }
@@ -313,16 +315,22 @@ export async function startCaptureWithRepository(
     input.idempotencyKey,
   );
 
+  const requestedCaptureId =
+    existing === null
+      ? (args.createCaptureId ?? (() => crypto.randomUUID()))()
+      : null;
   const session =
     existing ??
     (await repository.createCaptureSession({
       capture: input,
-      captureId: (args.createCaptureId ?? (() => crypto.randomUUID()))(),
+      captureId: requestedCaptureId!,
       expiresAt: new Date(
         now.getTime() + CAPTURE_SESSION_LIFETIME_MS,
       ).toISOString(),
       ownerUserId,
     }));
+  const isRetry =
+    existing !== null || session.id !== requestedCaptureId;
 
   const reusableSession = await requireReusableSession(
     repository,
@@ -332,7 +340,9 @@ export async function startCaptureWithRepository(
     now,
   );
 
-  return createUploadTargets(repository, ownerUserId, reusableSession);
+  return createUploadTargets(repository, ownerUserId, reusableSession, {
+    upsert: isRetry,
+  });
 }
 
 function parseCaptureSession(
@@ -447,10 +457,10 @@ async function createCaptureStartRepository(): Promise<CaptureStartRepository> {
 
       return parseCaptureSession(data);
     },
-    async createSignedUploadUrl(storagePath) {
+    async createSignedUploadUrl(storagePath, options) {
       const { data, error } = await admin.storage
         .from(RAW_CAPTURE_BUCKET)
-        .createSignedUploadUrl(storagePath);
+        .createSignedUploadUrl(storagePath, options);
 
       if (error) {
         throw error;
