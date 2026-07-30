@@ -4,7 +4,7 @@
 
 **Goal:** Build a personal, testable Web application and Chrome/Edge extension that reliably saves manual inputs and ChatGPT conversations, distinguishes complete/partial/failed capture, and never reports success before the server confirms durable storage.
 
-**Architecture:** Use a pnpm TypeScript monorepo with a Next.js App Router Web application, a WXT Manifest V3 extension, shared Zod contracts, pure domain modules, and Supabase Auth/Postgres/private Storage. Capture uses a two-phase protocol: create a capture session and signed attachment uploads, then finalize in one database transaction that creates the source version and queued processing job. The extension keeps an outbox in `chrome.storage.local` until finalization returns a durable receipt.
+**Architecture:** Use a pnpm TypeScript monorepo with a Next.js App Router Web application, a WXT Manifest V3 extension, shared Zod contracts, pure domain modules, and Supabase Auth/Postgres/private Storage. Capture uses a two-phase protocol: create a capture session and signed attachment uploads, then finalize in one database transaction that creates the source version and queued processing job. The extension keeps outbox metadata in `chrome.storage.local` and attachment bytes in extension-owned IndexedDB until finalization returns a durable receipt.
 
 **Tech Stack:** Node.js 20.9 or newer, pnpm workspaces, TypeScript, Next.js App Router, React, Tailwind CSS, WXT Manifest V3, Supabase Auth/Postgres/Storage, Zod, Vitest, Testing Library, Playwright.
 
@@ -1812,21 +1812,38 @@ Set `wxt.config.ts`:
 ```ts
 import { defineConfig } from "wxt";
 
+function hostPermission(name: string, fallback: string) {
+  const configured = process.env[name] ?? fallback;
+  const url = new URL(configured);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(`${name} must use HTTP or HTTPS`);
+  }
+  return `${url.origin}/*`;
+}
+
 export default defineConfig({
   manifestVersion: 3,
   manifest: {
     name: "Recall AI Capture",
     description: "Save selected conversations and pages to your private Recall AI library.",
-    permissions: ["storage", "activeTab", "scripting", "notifications"],
+    permissions: [
+      "storage",
+      "unlimitedStorage",
+      "activeTab",
+      "scripting",
+      "notifications",
+      "alarms"
+    ],
     host_permissions: [
       "https://chatgpt.com/*",
-      "http://localhost:3000/*"
+      hostPermission("WXT_PUBLIC_API_ORIGIN", "http://localhost:3000"),
+      hostPermission("WXT_PUBLIC_SUPABASE_URL", "http://127.0.0.1:54321")
     ]
   }
 });
 ```
 
-Production API origin is injected at build time as `WXT_PUBLIC_API_ORIGIN`; it must be added explicitly to host permissions in the production build configuration.
+Production API and Supabase origins are injected at build time as `WXT_PUBLIC_API_ORIGIN` and `WXT_PUBLIC_SUPABASE_URL`; both must be validated as HTTP(S) base origins and added explicitly to host permissions. `WXT_PUBLIC_SUPABASE_URL` is the project base URL such as `https://<project-ref>.supabase.co`, not a URL already ending in `/storage/v1`. `alarms` is required because Manifest V3 service workers cannot rely on `setTimeout` for wake-up after suspension. `unlimitedStorage` protects the IndexedDB attachment outbox from the default extension storage quota. No service-role key or arbitrary user-entered origin is allowed in the extension.
 
 - [ ] **Step 2: Write failing credential storage tests**
 
@@ -1866,7 +1883,7 @@ The popup’s unpaired state asks for:
 - 8-character pairing code;
 - device label, defaulting to the browser name.
 
-The API origin comes only from the build-time `WXT_PUBLIC_API_ORIGIN`, because Manifest V3 host permissions cannot safely follow arbitrary user-entered origins. The popup calls `/api/extension/pairing/exchange`, saves the returned token with `browser.storage.local`, clears the code input, and never logs the token.
+The Recall API and Supabase Storage network origins come only from the build-time `WXT_PUBLIC_API_ORIGIN` and `WXT_PUBLIC_SUPABASE_URL`, because Manifest V3 host permissions cannot safely follow arbitrary user-entered origins. The popup calls `/api/extension/pairing/exchange`, saves the returned token with `browser.storage.local`, clears the code input, and never logs the token.
 
 - [ ] **Step 4: Implement the typed API client**
 
@@ -2093,11 +2110,25 @@ git commit -m "feat: extract chatgpt conversations safely"
 
 **Files:**
 - Create: `apps/extension/lib/outbox.ts`
+- Create: `apps/extension/lib/attachment-store.ts`
+- Create: `apps/extension/lib/storage-upload.ts`
 - Create: `apps/extension/lib/capture-runner.ts`
+- Create: `apps/extension/lib/runtime-messages.ts`
+- Create: `apps/extension/lib/chatgpt/to-capture-draft.ts`
+- Create: `apps/extension/lib/background-controller.ts`
+- Create: `apps/extension/public/icon-128.png`
 - Modify: `apps/extension/entrypoints/background.ts`
 - Modify: `apps/extension/entrypoints/popup/App.tsx`
+- Modify: `apps/extension/entrypoints/popup/App.test.tsx`
+- Modify: `apps/extension/lib/api-client.ts`
+- Modify: `apps/extension/lib/api-client.test.ts`
+- Modify: `apps/extension/wxt.config.ts`
 - Test: `apps/extension/lib/outbox.test.ts`
+- Test: `apps/extension/lib/attachment-store.test.ts`
+- Test: `apps/extension/lib/storage-upload.test.ts`
 - Test: `apps/extension/lib/capture-runner.test.ts`
+- Test: `apps/extension/lib/chatgpt/to-capture-draft.test.ts`
+- Test: `apps/extension/lib/background-controller.test.ts`
 
 **Interfaces:**
 - Consumes: Task 8 API client, Task 9 extraction.
@@ -2105,6 +2136,8 @@ git commit -m "feat: extract chatgpt conversations safely"
   - `enqueueDraft(draft: CaptureDraft): Promise<OutboxItem>`.
   - `processOutboxItem(id: string, now: Date): Promise<OutboxItem>`.
   - `listUnresolvedOutbox(): Promise<OutboxItem[]>`.
+  - `putAttachment(blobKey: string, blob: Blob): Promise<void>` and matching read/delete operations backed by IndexedDB.
+  - `uploadToSignedTarget(target, blob): Promise<UploadedAttachment>` using the configured Supabase Storage origin and the server-issued signed token.
   - Browser notifications for attempts that remain unresolved after automatic retry.
 
 - [ ] **Step 1: Write failing outbox state tests**
@@ -2154,7 +2187,7 @@ Expected: FAIL because `outbox.ts` does not exist.
 
 - [ ] **Step 3: Implement outbox persistence**
 
-Store JSON-serializable outbox items under `recall.captureOutbox` in `browser.storage.local`.
+Store JSON-serializable outbox metadata under `recall.captureOutbox` in `browser.storage.local`. Store attachment bytes in extension-owned IndexedDB and keep only stable `blobKey` references in the JSON item. The outbox item must be persisted before the first Recall API request. Attachment materialization may fetch a page image before the first API request, but once bytes, MIME, size, and SHA-256 have been resolved, that immutable manifest and Blob must be persisted before `start` is called.
 
 States:
 
@@ -2164,42 +2197,80 @@ type OutboxState =
   | "uploading"
   | "finalizing"
   | "retry_wait"
+  | "auth_paused"
+  | "terminal"
   | "complete"
   | "partial";
 ```
 
 Rules:
 
-- items are created before the first network call;
+- a pending draft containing the source URL and pending image references is persisted before any page-image fetch, and the finalized immutable item is persisted before the first Recall API or Supabase Storage request;
 - idempotency key never changes across retries;
-- raw draft remains until a server receipt is stored;
-- complete and partial receipts remain for seven days, then may be pruned;
-- failed items remain until successful retry;
+- a complete receipt permits attachment Blob cleanup after its atomic local write, while a partial receipt retains the draft and attachment Blobs until a linked recovery item stores a real receipt;
+- complete receipts may be pruned after seven days;
+- partial, retry, authentication-paused, and terminal items are never silently pruned while unresolved;
+- `auth_paused` and `terminal` use `nextAttemptAt: null` and are excluded from automatic alarms; pairing resumes `auth_paused`, while `terminal` requires an explicit new recovery item and idempotency key;
 - retry delay is 30 seconds, 2 minutes, 10 minutes, 1 hour, then 6 hours;
 - extension badge shows unresolved item count.
+
+Outbox mutations must be serialized so simultaneous alarm and manual retries cannot overwrite each other. `captureId` is persisted immediately after `start`. A `complete` or `partial` state is valid only when the same storage write also contains the real server receipt. Corrupt stored data must surface an error rather than being replaced silently with an empty outbox. Each recovery item stores `recoveryOfItemId`; when it stores a real receipt, the previous partial item keeps its original receipt but receives `supersededByItemId` and `resolvedAt` and no longer counts as unresolved. A partial recovery receipt therefore replaces one unresolved item with the newer partial item instead of double-counting both.
+
+IndexedDB cleanup is reference-safe: removing an eligible complete item deletes only its Blob keys, partial/auth-paused/terminal/retry items retain their keys, and a startup reconciliation may delete an orphan Blob only when no valid outbox item references it and its attachment-store timestamp is older than seven days.
+
+Attachment rules:
+
+- the runner downloads or decodes each Task 9 image before calling `start`;
+- unsupported MIME, unreadable URL, CORS/permission failure, more than 50 files, a file over 10 MiB, or more than 100 MiB total removes that not-yet-frozen attachment from the immutable manifest and adds a specific missing element;
+- usable attachment bytes are hashed and written to IndexedDB before the capture session starts;
+- no wildcard CDN host permission is added; an unreadable external image becomes an honest partial capture with screenshot recovery;
+- once `start` succeeds, retries reuse exactly the same manifest and Blob bytes.
 
 - [ ] **Step 4: Implement the capture runner**
 
 `processOutboxItem`:
 
-1. loads the current item;
-2. starts the capture session if `captureId` is absent;
-3. uploads attachments;
-4. finalizes with the stable idempotency key;
-5. stores the receipt before updating the popup;
-6. maps server `complete` to complete and `partial` to partial;
-7. on network/server failure stores `retry_wait` and the human-readable reason;
-8. never creates a synthetic success receipt.
+1. loads the current item under a per-item lock so alarm, popup, and startup recovery cannot process it concurrently;
+2. returns without a network call when a real receipt is already stored;
+3. materializes pending images, persists immutable attachment manifests and IndexedDB Blobs, and records any unreadable images as missing before the first Recall API call;
+4. when the item is `finalizing` with a persisted `captureId`, queries status first; a real receipt finishes the item, `capture_not_finalized` continues recovery, and a failed status still proceeds to `start` so the server can renew an expired session or reopen a signed-upload setup failure;
+5. calls `start` on every other unfinished attempt with the same idempotency key, even when `captureId` is already known, so an expired signed upload token is refreshed;
+6. treats `capture_already_finalized` as a recovery signal rather than a conflict: query status with the locally persisted capture id or the validated `captureId` carried by the error response, and accept success only from that real status receipt;
+7. persists the returned `captureId` before uploading and rejects a different id for the same outbox item;
+8. uploads the immutable IndexedDB Blobs to the returned signed Storage targets and persists the uploaded paths plus optional observable ETags;
+9. switches to `finalizing` before calling finalize with the stable idempotency key;
+10. calls the status endpoint when finalize may have committed but its response was lost, and accepts success only from a real status or finalize receipt;
+11. stores the receipt and `complete` or `partial` state atomically before notifying the popup;
+12. maps server `complete` to complete and server `partial` to partial without upgrading missing content;
+13. maps network errors, HTTP 429, HTTP 5xx, temporary upload failure, lost finalize responses, and an unfinalized status to `retry_wait` with the configured delay and a human-readable reason;
+14. maps HTTP 401 and `ExtensionAuthExpiredError` to `auth_paused` until the user pairs again;
+15. retains invalid captures, idempotency/capture conflicts other than `capture_already_finalized`, a subsequent `capture_already_failed` response from `start`, and inconsistencies between an already-frozen manifest and its Blob as `terminal`; unsupported or oversized page images discovered before freezing instead become explicit missing elements on an honest partial capture;
+16. never creates a synthetic success receipt from a conflict, response code, local claim, or previous attempt.
+
+`ExtensionApiError` preserves the validated error `code`, optional response `captureId`, request id, HTTP status, and safe human-readable message so the runner can distinguish `capture_already_finalized`, `capture_not_finalized`, authentication, retryable failures, and terminal conflicts without retaining arbitrary response payloads.
+
+Signed upload tokens and constructed signed URLs are attempt-local secrets: do not write them to `browser.storage.local`, IndexedDB, logs, notifications, or error messages. The upload client uses native `fetch` and only the base origin in `WXT_PUBLIC_SUPABASE_URL`; it does not require a Supabase publishable key or the Supabase JavaScript client. For each target it:
+
+1. encodes `storagePath` one segment at a time with `encodeURIComponent` while preserving `/` separators;
+2. constructs `${supabaseOrigin}/storage/v1/object/upload/sign/raw-captures/${encodedPath}` with `new URL`, then sets `token` through `url.searchParams`;
+3. creates `FormData`, appends `cacheControl` with value `3600`, and appends the Blob under the empty field name with its frozen file name;
+4. sends `PUT` with the storage-js-compatible `x-upsert: "false"` header and does not infer overwrite authority from local state; the server's `createSignedUploadUrl({ upsert })` token decides whether overwrite is permitted, and the signed-upload client's `upsert` option is documented as having no effect;
+5. accepts only `response.ok`, treats the response body as diagnostic-only JSON/text, and returns an ETag only when the response header exposes a non-empty value.
+
+`storage-upload.test.ts` asserts the exact URL, encoded path, query parameter, method, header, and multipart fields with an injected fetch. Task 11's local Supabase extension E2E verifies this same helper against a real signed target. No service-role key may enter the extension source, environment, or build output.
 
 - [ ] **Step 5: Implement automatic retries and notifications**
 
 The service worker:
 
+- resumes items left in `uploading` or `finalizing` after service-worker startup or suspension;
 - creates a browser alarm for the nearest `nextAttemptAt`;
 - processes due items when the alarm fires;
 - updates the badge;
 - shows `采集仍未完成` notification after three failed attempts;
 - opens the popup/outbox view when the notification is clicked.
+
+The generated Manifest V3 configuration must include `alarms`; a suspended service worker must not depend on `setTimeout` for retry. Create a synthetic, non-sensitive 128×128 PNG at `apps/extension/public/icon-128.png`, package it with the extension, and use it for notifications. Notification or badge failure is recorded for diagnostics but must not delete, finalize, or otherwise change the capture receipt.
 
 - [ ] **Step 6: Implement honest popup status**
 
@@ -2210,19 +2281,23 @@ Copy:
 - retry wait: red, `服务器尚未确认保存`, next retry time and immediate retry;
 - processing failed from status endpoint: blue, `原文已保存，后台处理失败`, no capture-loss language.
 
-The add-screenshot action calls `browser.tabs.captureVisibleTab()` while `activeTab` permission is active, converts the data URL to an `image/png` Blob, hashes it, appends it to a new outbox attempt linked to the same `externalRef`, and finalizes a new source version. If screenshot permission or capture fails, retain the original partial receipt and show the exact browser error.
+The add-screenshot action first verifies that the active tab is still the originating conversation by comparing its ChatGPT conversation id with the draft's separately stored `originConversationRef` and `originUrl`; scoped `externalRef` hashes are not used for this comparison. It then calls `browser.tabs.captureVisibleTab()` while `activeTab` permission is active. It converts the data URL to an `image/png` Blob, hashes and persists it in IndexedDB, and creates a new outbox item with a new idempotency key and `recoveryOfItemId`. The recovery draft clones the original `source` (`chatgpt_web`), scope, scoped `externalRef`, title, sensitivity, ordered messages, raw display text, and still-relevant missing elements, then appends the screenshot attachment. Keeping both `source` and `externalRef` stable is what creates a new version of the same SourceItem; it must not be changed to `manual_screenshot`. The original partial receipt remains unchanged. A screenshot does not automatically prove every previous missing element is recovered; unless the adapter verifies each missing element, the new capture remains partial. If tab validation, permission, or screenshot capture fails, retain the original partial receipt and show the exact browser error.
+
+Completeness is scope-aware: `full_conversation` assesses every captured message and image, `qa_pair` assesses only the selected user/assistant pair, and `selection` assesses only the actual selection. Missing images outside the selected scope must not make a QA pair or selection partial. For structured ChatGPT finalization, send ordered messages and `rawText: ""` so the shared 2 MiB validator does not count the same conversation text twice; the local draft may retain scoped raw text for display.
+
+When the popup opens or the user explicitly refreshes an item with a stored receipt, the background controller calls the status endpoint and updates only the real receipt's `processingStatus` and other server-returned receipt fields. A later processing failure therefore displays `原文已保存，后台处理失败` without changing capture completeness or implying raw-content loss.
 
 - [ ] **Step 7: Run outbox and extension tests**
 
 Run:
 
 ```bash
-pnpm vitest run apps/extension/lib/outbox.test.ts apps/extension/lib/capture-runner.test.ts
+pnpm vitest run apps/extension/lib/api-client.test.ts apps/extension/lib/outbox.test.ts apps/extension/lib/attachment-store.test.ts apps/extension/lib/storage-upload.test.ts apps/extension/lib/capture-runner.test.ts apps/extension/lib/chatgpt/to-capture-draft.test.ts apps/extension/lib/background-controller.test.ts apps/extension/entrypoints/popup/App.test.tsx
 pnpm --filter @recall/extension typecheck
 pnpm --filter @recall/extension build
 ```
 
-Expected: network failure leaves an unresolved outbox item; repeated retry reuses the idempotency key; popup shows success only after a stored server receipt.
+Expected: network failure leaves an unresolved outbox item; retries reuse the idempotency key while refreshing the signed token; attachment Blobs survive a new IndexedDB store instance; manifest permissions, exact host origins, and the packaged notification icon are verified; popup shows success only after a real server receipt is stored.
 
 - [ ] **Step 8: Commit reliable retry**
 
@@ -2276,10 +2351,12 @@ test("partial capture remains visible until resolved", async ({ page }) => {
 
 `listExceptions(ownerUserId)` returns:
 
-- partial capture versions;
+- the latest still-unresolved partial version for each source item, excluding older partial versions superseded by a later complete version;
 - failed capture sessions;
 - processing jobs with `failed`;
 - no records from other owners.
+
+A purely offline extension draft that never reached `/captures/start` has no server session or version, so it remains visible only in the extension outbox. The Web exception list includes it only after a real server session or version exists; it must not fabricate server-side failure rows from extension-local state.
 
 The home page exception count uses the same query.
 
@@ -2308,7 +2385,7 @@ Exception card fields:
 
 - [ ] **Step 4: Build the Playwright extension fixture**
 
-Use `chromium.launchPersistentContext` with the built WXT output. Resolve the Manifest V3 service worker and extension id, expose the popup page, and serve synthetic ChatGPT fixture HTML from a local test server at a host allowed by the test manifest.
+Use `chromium.launchPersistentContext` with the built WXT output. Resolve the Manifest V3 service worker and extension id, expose the popup page, and serve synthetic ChatGPT fixture HTML and generated image bytes from a local test server. A test-only extension build adds only that server's exact origin to `host_permissions` and content-script matches through `WXT_TEST_FIXTURE_ORIGIN`; production builds ignore this variable and never include the fixture host. Rewrite fixture image URLs to the local server so automated tests do not require `example.test` or a wildcard CDN permission.
 
 Do not rely on a real ChatGPT account in automated tests.
 
@@ -2347,9 +2424,10 @@ NEXT_PUBLIC_SUPABASE_URL
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 SUPABASE_SERVICE_ROLE_KEY
 WXT_PUBLIC_API_ORIGIN
+WXT_PUBLIC_SUPABASE_URL
 ```
 
-It must explain pairing, loading the extension in Chrome/Edge, and checking the outbox.
+`WXT_PUBLIC_SUPABASE_URL` is the Supabase project base origin such as `http://127.0.0.1:54321` or `https://<project-ref>.supabase.co`, never a value already ending in `/storage/v1`. The runbook must explain pairing, loading the extension in Chrome/Edge, and checking the outbox.
 
 - [ ] **Step 7: Add and execute the acceptance checklist**
 
@@ -2393,8 +2471,8 @@ Expected: no matches.
 Open the generated manifest and verify:
 
 - `manifest_version` is `3`;
-- permissions are only `storage`, `activeTab`, `scripting`, and `notifications`;
-- host permissions are only ChatGPT and the configured API origin.
+- permissions are only `storage`, `unlimitedStorage`, `activeTab`, `scripting`, `notifications`, and `alarms`;
+- host permissions are only ChatGPT, the configured Recall API origin, and the configured Supabase Storage origin.
 
 - [ ] **Step 9: Commit the Milestone A vertical slice**
 
