@@ -1,3 +1,5 @@
+import { browser } from "wxt/browser";
+
 export default defineBackground(() => {
-  // Milestone A behavior is implemented in later tasks.
+  void browser.action.setBadgeText({ text: "" });
 });
