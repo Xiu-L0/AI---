@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
@@ -7,8 +7,12 @@ import { assessChatGptCompleteness } from "./completeness";
 import { extractChatGptConversation } from "./extract";
 
 function extractFixture(name: string) {
+  const rootCandidate = resolve("tests/fixtures/chatgpt", name);
+  const fixturePath = existsSync(rootCandidate)
+    ? rootCandidate
+    : resolve("../../tests/fixtures/chatgpt", name);
   const html = readFileSync(
-    resolve("tests/fixtures/chatgpt", name),
+    fixturePath,
     "utf8",
   );
   const fixtureDocument = new JSDOM(html, {

@@ -14,6 +14,7 @@ import {
   type StartCaptureInput,
   type StartCaptureResult,
 } from "@recall/contracts";
+import { z } from "zod";
 
 import { clearExtensionCredential } from "./auth-store";
 
@@ -26,20 +27,60 @@ export interface CaptureApiClient {
   status(captureId: string): Promise<CaptureStatusResult>;
 }
 
+const ExtensionApiErrorCodeSchema = z.enum([
+  "authentication_required",
+  "capture_already_failed",
+  "capture_already_finalized",
+  "capture_conflict",
+  "capture_not_finalized",
+  "capture_not_found",
+  "capture_session_expired",
+  "idempotency_conflict",
+  "invalid_capture",
+  "invalid_or_expired_pairing_code",
+  "invalid_pairing_request",
+  "signed_upload_failed",
+]);
+
+export type ExtensionApiErrorCode = z.infer<
+  typeof ExtensionApiErrorCodeSchema
+>;
+
+const CaptureIdSchema = z.string().uuid();
+const RequestIdSchema = z.string().trim().min(1).max(500);
+
+const safeErrorMessages: Record<ExtensionApiErrorCode, string> = {
+  authentication_required: "扩展连接已失效，请重新配对",
+  capture_already_failed: "该采集会话已经失败，需要重新采集",
+  capture_already_finalized: "服务器已经保存该采集，正在恢复回执",
+  capture_conflict: "采集内容与服务器记录冲突，需要重新采集",
+  capture_not_finalized: "服务器尚未完成保存确认",
+  capture_not_found: "服务器找不到该采集会话",
+  capture_session_expired: "采集会话已过期，扩展将自动重试",
+  idempotency_conflict: "采集幂等标识发生冲突，需要重新采集",
+  invalid_capture: "采集内容不符合服务器要求",
+  invalid_or_expired_pairing_code: "配对码无效或已过期",
+  invalid_pairing_request: "配对请求无效",
+  signed_upload_failed: "附件签名上传暂时失败",
+};
+
 export class ExtensionApiError extends Error {
-  readonly code: string | undefined;
+  readonly captureId: string | undefined;
+  readonly code: ExtensionApiErrorCode | "extension_auth_expired" | undefined;
   readonly requestId: string | undefined;
   readonly status: number;
 
   constructor(input: {
     status: number;
-    code?: string | undefined;
+    captureId?: string | undefined;
+    code?: ExtensionApiErrorCode | "extension_auth_expired" | undefined;
     requestId?: string | undefined;
     message?: string | undefined;
   }) {
     super(input.message ?? `Extension API request failed with HTTP ${input.status}`);
     this.name = "ExtensionApiError";
     this.status = input.status;
+    this.captureId = input.captureId;
     this.code = input.code;
     this.requestId = input.requestId;
   }
@@ -63,12 +104,29 @@ type ApiDependencies = {
   clearCredential?: () => Promise<void>;
 };
 
+function usesSecureTransport(url: URL): boolean {
+  return (
+    url.protocol === "https:" ||
+    (url.protocol === "http:" &&
+      ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))
+  );
+}
+
 function apiOrigin(override?: string): string {
   const configured =
     override ?? import.meta.env.WXT_PUBLIC_API_ORIGIN ?? "http://localhost:3000";
   const url = new URL(configured);
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("Extension API origin must use HTTP or HTTPS");
+  if (
+    !usesSecureTransport(url) ||
+    (url.pathname !== "" && url.pathname !== "/") ||
+    url.search.length > 0 ||
+    url.hash.length > 0 ||
+    url.username.length > 0 ||
+    url.password.length > 0
+  ) {
+    throw new Error(
+      "Extension API origin must use HTTPS, except for local development",
+    );
   }
   return url.origin;
 }
@@ -85,19 +143,12 @@ function errorDetails(payload: unknown) {
   if (typeof payload !== "object" || payload === null) {
     return {};
   }
+
+  const value = payload as Record<string, unknown>;
   return {
-    code:
-      "code" in payload && typeof payload.code === "string"
-        ? payload.code
-        : undefined,
-    message:
-      "message" in payload && typeof payload.message === "string"
-        ? payload.message
-        : undefined,
-    requestId:
-      "requestId" in payload && typeof payload.requestId === "string"
-        ? payload.requestId
-        : undefined,
+    captureId: CaptureIdSchema.safeParse(value.captureId).data,
+    code: ExtensionApiErrorCodeSchema.safeParse(value.code).data,
+    requestId: RequestIdSchema.safeParse(value.requestId).data,
   };
 }
 
@@ -116,14 +167,21 @@ async function requestJson(
   }
 
   const details = errorDetails(payload);
-  const requestId = response.headers.get("x-request-id") ?? details.requestId;
+  const headerRequestId = RequestIdSchema.safeParse(
+    response.headers.get("x-request-id"),
+  ).data;
+  const requestId = headerRequestId ?? details.requestId;
   if (response.status === 401 && dependencies.authenticated) {
     await dependencies.clearCredential();
     throw new ExtensionAuthExpiredError(requestId ?? undefined);
   }
   throw new ExtensionApiError({
+    captureId: details.captureId,
     code: details.code,
-    message: details.message,
+    message:
+      details.code === undefined
+        ? `扩展 API 请求失败（HTTP ${response.status}）`
+        : safeErrorMessages[details.code],
     requestId: requestId ?? undefined,
     status: response.status,
   });

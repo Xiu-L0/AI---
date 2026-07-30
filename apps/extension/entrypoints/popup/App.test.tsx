@@ -4,9 +4,65 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { App, type PopupServices } from "./App";
+import type { OutboxItem } from "../../lib/outbox-types";
+import { App, pageContextForUrl, type PopupServices } from "./App";
 
-const credential = { token: "a".repeat(43), expiresAt: "2026-08-28T00:00:00.000Z" };
+const credential = {
+  token: "a".repeat(43),
+  expiresAt: "2026-08-28T00:00:00.000Z",
+};
+
+function outboxItem(overrides: Partial<OutboxItem> = {}): OutboxItem {
+  const receipt = {
+    captureId: "20000000-0000-4000-8000-000000000001",
+    sourceItemId: "30000000-0000-4000-8000-000000000001",
+    captureStatus: "complete" as const,
+    processingStatus: "queued" as const,
+    savedMessageCount: 4,
+    savedAttachmentCount: 1,
+    missingElements: [],
+  };
+  return {
+    attachmentsPrepared: true,
+    attemptCount: 0,
+    captureId: receipt.captureId,
+    createdAt: "2026-07-30T00:00:00.000Z",
+    draft: {
+      attachments: [],
+      completeness: "complete",
+      externalRef: "conversation-1",
+      messages: [],
+      missingElements: [],
+      originConversationRef: "conversation-1",
+      originTabId: 1,
+      originUrl: "https://chatgpt.com/c/conversation-1",
+      originWindowId: 1,
+      pendingImages: [],
+      rawText: "Question\nAnswer",
+      scope: "full_conversation",
+      sensitivity: "normal",
+      source: "chatgpt_web",
+      title: "Synthetic conversation",
+    },
+    errorCode: null,
+    id: "outbox-1",
+    idempotencyKey: "idempotency-key-1",
+    lastError: null,
+    lastNotifiedAttemptCount: 0,
+    nextAttemptAt: null,
+    receipt,
+    receiptStoredAt: "2026-07-30T00:00:01.000Z",
+    recoveryOfItemId: null,
+    resolvedAt: "2026-07-30T00:00:01.000Z",
+    resumeStage: "finalizing",
+    schemaVersion: 1,
+    state: "complete",
+    supersededByItemId: null,
+    updatedAt: "2026-07-30T00:00:01.000Z",
+    uploadedAttachments: [],
+    ...overrides,
+  };
+}
 
 function services(overrides: Partial<PopupServices> = {}): PopupServices {
   return {
@@ -18,13 +74,29 @@ function services(overrides: Partial<PopupServices> = {}): PopupServices {
       supported: true,
       scopes: ["full_conversation" as const],
     })),
-    getOutboxCount: vi.fn(async () => 0),
+    listOutbox: vi.fn(async () => []),
     capture: vi.fn(),
+    retry: vi.fn(),
+    addScreenshotRecovery: vi.fn(),
+    refresh: vi.fn(),
     ...overrides,
   };
 }
 
 describe("extension popup", () => {
+  it("supports only the exact secure ChatGPT origin", () => {
+    expect(
+      pageContextForUrl("https://chatgpt.com/c/conversation-1").supported,
+    ).toBe(true);
+    expect(pageContextForUrl("http://chatgpt.com/c/conversation-1").supported).toBe(
+      false,
+    );
+    expect(
+      pageContextForUrl("https://chatgpt.com.attacker.example/c/conversation-1")
+        .supported,
+    ).toBe(false);
+  });
+
   it("pairs once and clears the code from the UI", async () => {
     const popupServices = services();
     render(<App services={popupServices} />);
@@ -37,29 +109,295 @@ describe("extension popup", () => {
     expect(popupServices.saveCredential).toHaveBeenCalledWith(credential);
   });
 
-  it("shows partial capture separately from processing", async () => {
-    const popupServices = services({
-      getCredential: vi.fn(async () => credential),
-      getOutboxCount: vi.fn(async () => 2),
-      capture: vi.fn(async () => ({
-        captureId: "20000000-0000-4000-8000-000000000001",
-        sourceItemId: "30000000-0000-4000-8000-000000000001",
-        captureStatus: "partial" as const,
-        processingStatus: "queued" as const,
-        savedMessageCount: 4,
+  it("shows partial separately from processing and keeps it after screenshot failure", async () => {
+    const partial = outboxItem({
+      draft: {
+        ...outboxItem().draft,
+        completeness: "partial",
+        missingElements: ["1 张图片无法读取"],
+      },
+      receipt: {
+        ...outboxItem().receipt!,
+        captureStatus: "partial",
+        processingStatus: "queued",
         savedAttachmentCount: 0,
         missingElements: ["1 张图片无法读取"],
-      })),
+      },
+      resolvedAt: null,
+      state: "partial",
+    });
+    const popupServices = services({
+      getCredential: vi.fn(async () => credential),
+      capture: vi.fn(async () => partial),
+      addScreenshotRecovery: vi.fn(async () => {
+        throw new Error("The active tab cannot be captured");
+      }),
     });
     render(<App services={popupServices} />);
 
-    expect(await screen.findByText("待处理异常 2")).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "保存到 Recall AI" }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "保存到 Recall AI" }),
+    );
 
     expect(await screen.findByText("部分内容未采集")).toBeVisible();
     expect(screen.getByText("1 张图片无法读取")).toBeVisible();
     expect(screen.getByText("原文已保存，等待后台处理")).toBeVisible();
     expect(screen.queryByText("完整采集成功")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "补充截图" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The active tab cannot be captured",
+    );
+    expect(screen.getByText("部分内容未采集")).toBeVisible();
+  });
+
+  it("retries a retry-wait item immediately and refreshes the exception count", async () => {
+    const waiting = outboxItem({
+      attemptCount: 2,
+      captureId: null,
+      lastError: "network unavailable",
+      nextAttemptAt: "2026-07-30T00:10:00.000Z",
+      receipt: null,
+      receiptStoredAt: null,
+      resolvedAt: null,
+      state: "retry_wait",
+    });
+    const complete = outboxItem({ id: waiting.id });
+    const listOutbox = vi
+      .fn<PopupServices["listOutbox"]>()
+      .mockResolvedValueOnce([waiting])
+      .mockResolvedValueOnce([complete]);
+    const popupServices = services({
+      getCredential: vi.fn(async () => credential),
+      listOutbox,
+      retry: vi.fn(async () => complete),
+    });
+    render(<App services={popupServices} />);
+
+    expect(await screen.findByText("待处理异常 1")).toBeVisible();
+    expect(screen.getByText("服务器尚未确认保存")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "立即重试" }));
+
+    expect(await screen.findByText("完整采集成功")).toBeVisible();
+    expect(await screen.findByText("待处理异常 0")).toBeVisible();
+    expect(popupServices.retry).toHaveBeenCalledWith(waiting.id);
+  });
+
+  it("prioritizes older unresolved items over a newer complete receipt and lets the user switch between them", async () => {
+    const complete = outboxItem({
+      id: "complete-newer",
+      updatedAt: "2026-07-30T00:10:00.000Z",
+    });
+    const terminal = outboxItem({
+      captureId: null,
+      draft: { ...outboxItem().draft, title: "结构变化" },
+      id: "terminal-older",
+      lastError: "页面结构已变化",
+      receipt: null,
+      receiptStoredAt: null,
+      resolvedAt: null,
+      state: "terminal",
+      updatedAt: "2026-07-30T00:01:00.000Z",
+    });
+    const waiting = outboxItem({
+      captureId: null,
+      draft: { ...outboxItem().draft, title: "网络中断" },
+      id: "retry-middle",
+      lastError: "network unavailable",
+      nextAttemptAt: "2026-07-30T00:20:00.000Z",
+      receipt: null,
+      receiptStoredAt: null,
+      resolvedAt: null,
+      state: "retry_wait",
+      updatedAt: "2026-07-30T00:02:00.000Z",
+    });
+    const partial = outboxItem({
+      draft: {
+        ...outboxItem().draft,
+        completeness: "partial",
+        missingElements: ["1 张图片无法读取"],
+        title: "缺少图片",
+      },
+      id: "partial-middle",
+      receipt: {
+        ...outboxItem().receipt!,
+        captureStatus: "partial",
+        missingElements: ["1 张图片无法读取"],
+      },
+      resolvedAt: null,
+      state: "partial",
+      updatedAt: "2026-07-30T00:03:00.000Z",
+    });
+    const authPaused = outboxItem({
+      captureId: null,
+      draft: { ...outboxItem().draft, title: "登录失效" },
+      id: "auth-newest-unresolved",
+      lastError: "credential expired",
+      receipt: null,
+      receiptStoredAt: null,
+      resolvedAt: null,
+      state: "auth_paused",
+      updatedAt: "2026-07-30T00:04:00.000Z",
+    });
+    const popupServices = services({
+      getCredential: vi.fn(async () => credential),
+      listOutbox: vi.fn(async () => [
+        complete,
+        terminal,
+        waiting,
+        partial,
+        authPaused,
+      ]),
+    });
+    render(<App services={popupServices} />);
+
+    expect(
+      await screen.findByText("扩展连接已失效，请重新配对"),
+    ).toBeVisible();
+    expect(screen.queryByText("完整采集成功")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "登录失效 · 需要重新配对" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "重新配对" })).toBeVisible();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "网络中断 · 等待重试" }),
+    );
+    expect(await screen.findByText("服务器尚未确认保存")).toBeVisible();
+    expect(screen.getByRole("button", { name: "立即重试" })).toBeVisible();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "缺少图片 · 部分内容未采集" }),
+    );
+    expect(await screen.findByText("部分内容未采集")).toBeVisible();
+    expect(screen.getByRole("button", { name: "补充截图" })).toBeVisible();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "结构变化 · 需要重新采集" }),
+    );
+    expect(
+      await screen.findByText("采集无法自动恢复，需要重新采集"),
+    ).toBeVisible();
+    await userEvent.click(
+      screen.getByRole("button", { name: "重新采集当前页面" }),
+    );
+    expect(popupServices.capture).toHaveBeenCalledWith({
+      recoveryOfItemId: terminal.id,
+      scope: "full_conversation",
+      sensitivity: "normal",
+    });
+  });
+
+  it("automatically refreshes processing status for a stored receipt on initialization", async () => {
+    const queued = outboxItem();
+    const processingFailed = outboxItem({
+      receipt: { ...queued.receipt!, processingStatus: "failed" },
+    });
+    const refresh = vi.fn(async () => processingFailed);
+    render(
+      <App
+        services={services({
+          getCredential: vi.fn(async () => credential),
+          listOutbox: vi.fn(async () => [queued]),
+          refresh,
+        })}
+      />,
+    );
+
+    expect(await screen.findByText("原文已保存，后台处理失败")).toBeVisible();
+    expect(refresh).toHaveBeenCalledWith(queued.id);
+  });
+
+  it("keeps a stored receipt visible when automatic processing refresh fails", async () => {
+    const queued = outboxItem();
+    render(
+      <App
+        services={services({
+          getCredential: vi.fn(async () => credential),
+          listOutbox: vi.fn(async () => [queued]),
+          refresh: vi.fn(async () => {
+            throw new Error("status endpoint unavailable");
+          }),
+        })}
+      />,
+    );
+
+    expect(await screen.findByText("完整采集成功")).toBeVisible();
+    expect(screen.getByText("原文已保存，等待后台处理")).toBeVisible();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "原文保存回执仍在本地，后台处理状态暂时无法刷新：status endpoint unavailable",
+    );
+  });
+
+  it.each([
+    ["auth_paused", "扩展连接已失效，请重新配对"],
+    ["terminal", "采集无法自动恢复，需要重新采集"],
+  ] as const)("shows %s as unresolved without success copy", async (state, copy) => {
+    const item = outboxItem({
+      captureId: null,
+      lastError: "capture blocked",
+      receipt: null,
+      receiptStoredAt: null,
+      resolvedAt: null,
+      state,
+    });
+    render(
+      <App
+        services={services({
+          getCredential: vi.fn(async () => credential),
+          listOutbox: vi.fn(async () => [item]),
+        })}
+      />,
+    );
+
+    expect(await screen.findByText(copy)).toBeVisible();
+    expect(screen.getByText("capture blocked")).toBeVisible();
+    expect(screen.queryByText("完整采集成功")).not.toBeInTheDocument();
+  });
+
+  it("does not show success before the real receipt is stored locally", async () => {
+    const unsafeComplete = outboxItem({ receiptStoredAt: null });
+    render(
+      <App
+        services={services({
+          getCredential: vi.fn(async () => credential),
+          capture: vi.fn(async () => unsafeComplete),
+        })}
+      />,
+    );
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "保存到 Recall AI" }),
+    );
+
+    expect(await screen.findByText("服务器尚未确认保存")).toBeVisible();
+    expect(screen.queryByText("完整采集成功")).not.toBeInTheDocument();
+  });
+
+  it("refreshes processing status without using capture-loss language", async () => {
+    const queued = outboxItem();
+    const processingFailed = outboxItem({
+      receipt: {
+        ...queued.receipt!,
+        processingStatus: "failed",
+      },
+    });
+    const popupServices = services({
+      getCredential: vi.fn(async () => credential),
+      capture: vi.fn(async () => queued),
+      refresh: vi.fn(async () => processingFailed),
+    });
+    render(<App services={popupServices} />);
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "保存到 Recall AI" }),
+    );
+    await userEvent.click(
+      await screen.findByRole("button", { name: "刷新状态" }),
+    );
+
+    expect(await screen.findByText("原文已保存，后台处理失败")).toBeVisible();
+    expect(screen.queryByText("采集失败")).not.toBeInTheDocument();
   });
 
   it("does not stay loading when extension state cannot be read", async () => {

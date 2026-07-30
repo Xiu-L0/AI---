@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
@@ -11,8 +11,12 @@ import {
 } from "./extract";
 
 function fixture(name: string) {
+  const rootCandidate = resolve("tests/fixtures/chatgpt", name);
+  const fixturePath = existsSync(rootCandidate)
+    ? rootCandidate
+    : resolve("../../tests/fixtures/chatgpt", name);
   return readFileSync(
-    resolve("tests/fixtures/chatgpt", name),
+    fixturePath,
     "utf8",
   );
 }

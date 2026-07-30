@@ -255,9 +255,9 @@ export const FinalizeCaptureInputSchema = z
   });
 
 export const UploadTargetSchema = z.object({
-  clientId: z.string().min(1),
-  storagePath: z.string().min(1),
-  token: z.string().min(1)
+  clientId: z.string().min(1).max(100),
+  storagePath: z.string().min(1).max(2_000),
+  token: z.string().min(1).max(4_096)
 });
 
 export const StartCaptureResultSchema = z.object({

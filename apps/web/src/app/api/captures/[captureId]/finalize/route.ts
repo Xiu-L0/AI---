@@ -69,10 +69,15 @@ export async function POST(request: Request, context: RouteContext) {
     if (error instanceof CaptureNotFoundError) {
       return NextResponse.json({ code: "capture_not_found" }, { status: 404 });
     }
+    if (error instanceof CaptureExpiredError) {
+      return NextResponse.json(
+        { code: "capture_session_expired", message: error.message },
+        { status: 409 },
+      );
+    }
     if (
       error instanceof CaptureConflictError ||
-      error instanceof CaptureVerificationError ||
-      error instanceof CaptureExpiredError
+      error instanceof CaptureVerificationError
     ) {
       return NextResponse.json(
         { code: "capture_conflict", message: error.message },

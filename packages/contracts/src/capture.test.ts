@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   CaptureReceiptSchema,
   FinalizeCaptureInputSchema,
-  StartCaptureInputSchema
+  StartCaptureInputSchema,
+  StartCaptureResultSchema
 } from "./capture";
 
 const MIB = 1024 * 1024;
@@ -38,6 +39,21 @@ function attachment(clientId: string, byteSize = 100) {
 }
 
 describe("capture contracts", () => {
+  it("bounds signed upload target fields from successful API responses", () => {
+    const result = StartCaptureResultSchema.safeParse({
+      captureId: "10000000-0000-4000-8000-000000000001",
+      uploadTargets: [
+        {
+          clientId: "file-1",
+          storagePath: "owner/capture/file.png",
+          token: "a".repeat(4_097)
+        }
+      ]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
   it("allows the server to obtain attachment ETags from private storage", () => {
     const result = FinalizeCaptureInputSchema.safeParse({
       idempotencyKey: "capture-key-1",

@@ -1,10 +1,27 @@
 import { defineConfig } from "wxt";
 
-function apiHostPermission() {
-  const origin = process.env.WXT_PUBLIC_API_ORIGIN ?? "http://localhost:3000";
-  const url = new URL(origin);
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("WXT_PUBLIC_API_ORIGIN must use HTTP or HTTPS");
+function usesSecureTransport(url: URL) {
+  return (
+    url.protocol === "https:" ||
+    (url.protocol === "http:" &&
+      ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))
+  );
+}
+
+export function hostPermission(name: string, fallback: string) {
+  const configured = process.env[name] ?? fallback;
+  const url = new URL(configured);
+  if (
+    !usesSecureTransport(url) ||
+    (url.pathname !== "" && url.pathname !== "/") ||
+    url.search.length > 0 ||
+    url.hash.length > 0 ||
+    url.username.length > 0 ||
+    url.password.length > 0
+  ) {
+    throw new Error(
+      `${name} must use HTTPS, except for local development`,
+    );
   }
   return `${url.origin}/*`;
 }
@@ -16,7 +33,18 @@ export default defineConfig({
     name: "Recall AI Capture",
     description:
       "Save selected conversations and pages to your private Recall AI library.",
-    permissions: ["storage", "activeTab", "scripting", "notifications"],
-    host_permissions: ["https://chatgpt.com/*", apiHostPermission()],
+    permissions: [
+      "storage",
+      "unlimitedStorage",
+      "activeTab",
+      "scripting",
+      "notifications",
+      "alarms",
+    ],
+    host_permissions: [
+      "https://chatgpt.com/*",
+      hostPermission("WXT_PUBLIC_API_ORIGIN", "http://localhost:3000"),
+      hostPermission("WXT_PUBLIC_SUPABASE_URL", "http://127.0.0.1:54321"),
+    ],
   },
 });

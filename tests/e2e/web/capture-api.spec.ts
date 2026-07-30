@@ -255,6 +255,53 @@ test("capture API finalizes durably, is idempotent, and hides other owners", asy
     expect(uploaded.status, uploaded.body).toBe(200);
     expect(uploaded.etag).toBeNull();
 
+    const attachmentRetryStart = await browserJsonRequest(
+      page,
+      "/api/captures/start",
+      {
+        method: "POST",
+        body: {
+          idempotencyKey: attachmentKey,
+          source: "manual_file",
+          scope: "upload",
+          title: "Synthetic attachment",
+          sensitivity: "normal",
+          externalRef: null,
+          attachments: [
+            {
+              clientId: "file-1",
+              fileName: "notes.txt",
+              mimeType: "text/plain",
+              byteSize: new TextEncoder().encode(attachmentText).byteLength,
+              sha256,
+            },
+          ],
+        },
+      },
+    );
+    expect(attachmentRetryStart.status).toBe(201);
+    expect(attachmentRetryStart.body.captureId).toBe(attachmentCaptureId);
+    const [retryUploadTarget] = attachmentRetryStart.body
+      .uploadTargets as Array<{
+      storagePath: string;
+      token: string;
+      clientId: string;
+    }>;
+    expect(retryUploadTarget).toMatchObject({
+      clientId: uploadTarget.clientId,
+      storagePath: uploadTarget.storagePath,
+    });
+
+    // The server creates this retry token with upsert enabled. The extension's
+    // direct signed-upload request deliberately keeps x-upsert=false, matching
+    // storage-js; overwrite authority comes from the signed token.
+    const retriedUpload = await uploadSignedTarget(
+      page,
+      retryUploadTarget,
+      attachmentText,
+    );
+    expect(retriedUpload.status, retriedUpload.body).toBe(200);
+
     const attachmentFinalize = await browserJsonRequest(
       page,
       `/api/captures/${attachmentCaptureId}/finalize`,
