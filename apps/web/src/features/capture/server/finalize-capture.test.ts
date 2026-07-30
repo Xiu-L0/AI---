@@ -17,6 +17,7 @@ import { buildCaptureStoragePath } from "./start-capture";
 const ownerUserId = "00000000-0000-0000-0000-000000000001";
 const captureId = "20000000-0000-0000-0000-000000000001";
 const sourceItemId = "30000000-0000-0000-0000-000000000001";
+const NOW = new Date("2026-07-29T20:00:00.000Z");
 const attachment: AttachmentManifest = {
   clientId: "file-1",
   fileName: "screen shot.png",
@@ -76,6 +77,7 @@ describe("finalizeCaptureWithRepository", () => {
       ownerUserId,
       captureId,
       input,
+      now: NOW,
     });
     const committedInput = vi.mocked(
       firstRepository.commitFinalization,
@@ -94,6 +96,7 @@ describe("finalizeCaptureWithRepository", () => {
         ownerUserId,
         captureId,
         input,
+        now: NOW,
       }),
     ).resolves.toEqual(first);
     expect(committed).not.toHaveBeenCalled();
@@ -112,6 +115,7 @@ describe("finalizeCaptureWithRepository", () => {
         ownerUserId,
         captureId,
         input,
+        now: NOW,
       }),
     ).rejects.toBeInstanceOf(CaptureConflictError);
   });
@@ -128,6 +132,7 @@ describe("finalizeCaptureWithRepository", () => {
       finalizeCaptureWithRepository(repository, {
         ownerUserId,
         captureId,
+        now: NOW,
         input: {
           ...input,
           uploadedAttachments: [
@@ -168,6 +173,7 @@ describe("finalizeCaptureWithRepository", () => {
       finalizeCaptureWithRepository(repository, {
         ownerUserId,
         captureId,
+        now: NOW,
         input: {
           ...input,
           uploadedAttachments: [
@@ -201,7 +207,7 @@ describe("finalizeCaptureWithRepository", () => {
         ownerUserId,
         captureId,
         input,
-        now: new Date("2026-07-29T20:00:00.000Z"),
+        now: NOW,
       }),
     ).rejects.toBeInstanceOf(CaptureConflictError);
     expect(repository.markSessionFailed).toHaveBeenCalledWith(
