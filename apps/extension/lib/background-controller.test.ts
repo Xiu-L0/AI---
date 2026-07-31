@@ -127,6 +127,7 @@ function setup(initial: OutboxItem[] = []) {
     })),
     getApiClient: vi.fn(async () => ({
       finalize: vi.fn(),
+      reportFailure: vi.fn(),
       start: vi.fn(),
       status: vi.fn(),
     })),
@@ -271,7 +272,15 @@ describe("background controller", () => {
       nextAttemptAt: "2026-07-30T13:00:00.000Z",
       state: "retry_wait",
     });
-    const test = setup([dueItem, future]);
+    const terminalReport = outboxItem({
+      captureId,
+      failureReportNextAttemptAt: "2026-07-30T12:30:00.000Z",
+      failureReportStatus: "pending",
+      id: "terminal-report-future",
+      nextAttemptAt: null,
+      state: "terminal",
+    });
+    const test = setup([dueItem, future, terminalReport]);
     test.process.mockImplementation(async (id: string) =>
       test.dependencies.outbox.mutate(
         id,
@@ -288,7 +297,105 @@ describe("background controller", () => {
 
     expect(test.process).toHaveBeenCalledTimes(1);
     expect(test.process).toHaveBeenCalledWith("due", fixedNow);
-    expect(test.scheduled.at(-1)).toBe(new Date(future.nextAttemptAt!).getTime());
+    expect(test.scheduled.at(-1)).toBe(
+      new Date(terminalReport.failureReportNextAttemptAt!).getTime(),
+    );
+  });
+
+  it("retries a due terminal failure report without changing it to capture retry", async () => {
+    const reportTime = "2026-07-30T12:00:00.000Z";
+    const terminal = outboxItem({
+      captureId,
+      errorCode: "upload_target_mismatch",
+      failureReportAttemptCount: 1,
+      failureReportNextAttemptAt: reportTime,
+      failureReportStatus: "pending",
+      id: "terminal-report",
+      nextAttemptAt: null,
+      state: "terminal",
+    });
+    const test = setup([terminal]);
+    test.process.mockImplementation(async (id) =>
+      test.dependencies.outbox.mutate(
+        id,
+        (current) => ({
+          ...current,
+          failureReportNextAttemptAt: null,
+          failureReportStatus: "reported",
+          failureReportedAt: fixedNow.toISOString(),
+        }),
+        fixedNow,
+      ),
+    );
+
+    await test.controller.processDueItems(fixedNow);
+
+    expect(test.process).toHaveBeenCalledWith(terminal.id, fixedNow);
+    expect(test.items[0]).toMatchObject({
+      failureReportStatus: "reported",
+      nextAttemptAt: null,
+      state: "terminal",
+    });
+  });
+
+  it("keeps terminal state when the failure-report runner throws", async () => {
+    const terminal = outboxItem({
+      captureId,
+      errorCode: "upload_target_mismatch",
+      failureReportAttemptCount: 1,
+      failureReportNextAttemptAt: fixedNow.toISOString(),
+      failureReportStatus: "pending",
+      id: "terminal-report-error",
+      nextAttemptAt: null,
+      state: "terminal",
+    });
+    const test = setup([terminal]);
+    const markRetry = vi.spyOn(test.dependencies.outbox, "markRetry");
+    const start = vi.fn();
+    const upload = vi.fn();
+    const finalize = vi.fn();
+    const reportFailure = vi.fn(async () => undefined);
+    test.process.mockRejectedValueOnce(new Error("runner boundary failed"));
+
+    await test.controller.processDueItems(fixedNow);
+
+    expect(markRetry).not.toHaveBeenCalled();
+    expect(test.items[0]).toMatchObject({
+      failureReportAttemptCount: 2,
+      failureReportNextAttemptAt: new Date(
+        fixedNow.getTime() + 2 * 60_000,
+      ).toISOString(),
+      failureReportStatus: "pending",
+      nextAttemptAt: null,
+      state: "terminal",
+    });
+
+    const retryTime = new Date(fixedNow.getTime() + 2 * 60_000);
+    test.process.mockImplementationOnce(async (id) => {
+      await reportFailure();
+      return test.dependencies.outbox.mutate(
+        id,
+        (current) => ({
+          ...current,
+          failureReportNextAttemptAt: null,
+          failureReportStatus: "reported",
+          failureReportedAt: retryTime.toISOString(),
+        }),
+        retryTime,
+      );
+    });
+
+    await test.controller.processDueItems(retryTime);
+
+    expect(reportFailure).toHaveBeenCalledOnce();
+    expect(start).not.toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
+    expect(finalize).not.toHaveBeenCalled();
+    expect(test.items[0]).toMatchObject({
+      failureReportStatus: "reported",
+      nextAttemptAt: null,
+      state: "terminal",
+    });
   });
 
   it("processes due items with concurrency capped at two", async () => {
@@ -691,6 +798,7 @@ describe("background controller", () => {
     );
     test.dependencies.getApiClient = vi.fn(async () => ({
       finalize: vi.fn(),
+      reportFailure: vi.fn(),
       start: vi.fn(),
       status: vi.fn(async () => status),
     }));

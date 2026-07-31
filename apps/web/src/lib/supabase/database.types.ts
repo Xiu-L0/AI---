@@ -45,6 +45,9 @@ export type Database = {
           id: string
           idempotency_key: string
           owner_user_id: string
+          recovery_of_capture_session_id: string | null
+          resolved_at: string | null
+          resolved_by_capture_session_id: string | null
           result_source_version_id: string | null
           scope: Database["public"]["Enums"]["capture_scope"]
           sensitivity: Database["public"]["Enums"]["sensitivity_level"]
@@ -63,6 +66,9 @@ export type Database = {
           id?: string
           idempotency_key: string
           owner_user_id: string
+          recovery_of_capture_session_id?: string | null
+          resolved_at?: string | null
+          resolved_by_capture_session_id?: string | null
           result_source_version_id?: string | null
           scope: Database["public"]["Enums"]["capture_scope"]
           sensitivity: Database["public"]["Enums"]["sensitivity_level"]
@@ -81,6 +87,9 @@ export type Database = {
           id?: string
           idempotency_key?: string
           owner_user_id?: string
+          recovery_of_capture_session_id?: string | null
+          resolved_at?: string | null
+          resolved_by_capture_session_id?: string | null
           result_source_version_id?: string | null
           scope?: Database["public"]["Enums"]["capture_scope"]
           sensitivity?: Database["public"]["Enums"]["sensitivity_level"]
@@ -91,8 +100,26 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "capture_sessions_recovery_owner_fk"
+            columns: ["recovery_of_capture_session_id", "owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "capture_sessions"
+            referencedColumns: ["id", "owner_user_id"]
+          },
+          {
+            foreignKeyName: "capture_sessions_resolution_owner_fk"
+            columns: ["resolved_by_capture_session_id", "owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "capture_sessions"
+            referencedColumns: ["id", "owner_user_id"]
+          },
+          {
             foreignKeyName: "capture_sessions_result_version_item_owner_fk"
-            columns: ["result_source_version_id", "source_item_id", "owner_user_id"]
+            columns: [
+              "result_source_version_id",
+              "source_item_id",
+              "owner_user_id",
+            ]
             isOneToOne: false
             referencedRelation: "source_versions"
             referencedColumns: ["id", "source_item_id", "owner_user_id"]
@@ -436,6 +463,14 @@ export type Database = {
       is_valid_missing_elements: {
         Args: { missing_elements: string[] }
         Returns: boolean
+      }
+      report_capture_failure: {
+        Args: {
+          p_capture_id: string
+          p_failure_reason: string
+          p_owner_user_id: string
+        }
+        Returns: Json
       }
     }
     Enums: {

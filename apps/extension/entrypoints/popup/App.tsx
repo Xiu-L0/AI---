@@ -17,6 +17,7 @@ import {
   getExtensionCredential,
   saveExtensionCredential,
 } from "../../lib/auth-store";
+import { isSupportedChatGptUrl } from "../../lib/chatgpt/origins";
 import {
   isUnresolvedOutboxItem,
   type OutboxItem,
@@ -68,7 +69,7 @@ export function pageContextForUrl(urlValue: string | undefined): PageContext {
   } catch {
     return { label: "无法识别当前页面", scopes: [], supported: false };
   }
-  if (url.origin === "https://chatgpt.com") {
+  if (isSupportedChatGptUrl(url.href)) {
     return {
       label: "ChatGPT 网页版",
       scopes: ["full_conversation", "qa_pair", "selection"],

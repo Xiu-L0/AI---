@@ -26,6 +26,7 @@ const supportedMimeTypes = new Set([
 
 export interface BrowserCaptureDraft {
   idempotencyKey: string;
+  recoveryCaptureId?: string;
   title: string;
   rawText: string;
   files: File[];
@@ -45,6 +46,7 @@ export type SubmitCapture = (
 ) => Promise<CaptureReceiptData>;
 
 export interface ManualCaptureFormProps {
+  recoveryCaptureId?: string;
   submitCapture: SubmitCapture;
 }
 
@@ -143,6 +145,7 @@ function fileProgressCopy(
 }
 
 export function ManualCaptureForm({
+  recoveryCaptureId,
   submitCapture
 }: ManualCaptureFormProps) {
   const [title, setTitle] = useState("");
@@ -210,6 +213,7 @@ export function ManualCaptureForm({
       idempotencyKey ?? globalThis.crypto.randomUUID();
     const draft: BrowserCaptureDraft = {
       idempotencyKey: stableIdempotencyKey,
+      ...(recoveryCaptureId === undefined ? {} : { recoveryCaptureId }),
       ...draftFields
     };
 

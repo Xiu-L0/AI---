@@ -106,6 +106,34 @@ describe("uploadCapture", () => {
     expect(uploadToSignedUrl).toHaveBeenCalledOnce();
   });
 
+  it("sends an explicit failed-session recovery link only in the start request", async () => {
+    const recoveryCaptureId =
+      "20000000-0000-4000-8000-000000000099";
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(startResponse(), 201))
+      .mockResolvedValueOnce(jsonResponse(receiptResponse()));
+
+    await uploadCapture(
+      { ...makeDraft(), recoveryCaptureId },
+      {
+        createIdempotencyKey: () => IDEMPOTENCY_KEY,
+        fetch: fetchImplementation,
+        hashFile,
+        uploadToSignedUrl,
+      },
+    );
+
+    const startBody = JSON.parse(
+      String(fetchImplementation.mock.calls[0]?.[1]?.body),
+    ) as { recoveryCaptureId?: string };
+    const finalizeBody = JSON.parse(
+      String(fetchImplementation.mock.calls[1]?.[1]?.body),
+    ) as { recoveryCaptureId?: string };
+    expect(startBody.recoveryCaptureId).toBe(recoveryCaptureId);
+    expect(finalizeBody).not.toHaveProperty("recoveryCaptureId");
+  });
+
   it("surfaces a start failure without uploading or finalizing", async () => {
     const fetchImplementation = vi
       .fn<typeof fetch>()

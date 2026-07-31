@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   CaptureReceiptSchema,
   FinalizeCaptureInputSchema,
+  ReportCaptureFailureInputSchema,
+  ReportCaptureFailureResultSchema,
   StartCaptureInputSchema,
   StartCaptureResultSchema
 } from "./capture";
@@ -39,6 +41,41 @@ function attachment(clientId: string, byteSize = 100) {
 }
 
 describe("capture contracts", () => {
+  it("accepts only bounded, machine-readable capture failure reports", () => {
+    expect(
+      ReportCaptureFailureInputSchema.safeParse({
+        failureCode: "upload_target_mismatch"
+      }).success
+    ).toBe(true);
+    expect(
+      ReportCaptureFailureInputSchema.safeParse({
+        failureCode: "signed-url:https://example.test/token"
+      }).success
+    ).toBe(false);
+    expect(
+      ReportCaptureFailureInputSchema.safeParse({
+        failureCode: "invalid_capture",
+        failureReason: "raw content must never be accepted"
+      }).success
+    ).toBe(false);
+  });
+
+  it("requires a failed server result without a durable receipt", () => {
+    const result = ReportCaptureFailureResultSchema.safeParse({
+      captureId: "20000000-0000-4000-8000-000000000001",
+      captureStatus: "failed",
+      failureReason: "Capture data did not meet validation requirements"
+    });
+
+    expect(result.success).toBe(true);
+    expect(
+      ReportCaptureFailureResultSchema.safeParse({
+        ...result.data,
+        sourceItemId: "30000000-0000-4000-8000-000000000001"
+      }).success
+    ).toBe(false);
+  });
+
   it("bounds signed upload target fields from successful API responses", () => {
     const result = StartCaptureResultSchema.safeParse({
       captureId: "10000000-0000-4000-8000-000000000001",
@@ -85,6 +122,20 @@ describe("capture contracts", () => {
     );
 
     expect(result.success).toBe(false);
+  });
+
+  it("accepts only a UUID as an explicit capture recovery link", () => {
+    const valid = StartCaptureInputSchema.safeParse({
+      ...captureStartWith([]),
+      recoveryCaptureId: "20000000-0000-4000-8000-000000000001"
+    });
+    const invalid = StartCaptureInputSchema.safeParse({
+      ...captureStartWith([]),
+      recoveryCaptureId: "previous-capture"
+    });
+
+    expect(valid.success).toBe(true);
+    expect(invalid.success).toBe(false);
   });
 
   it.each([

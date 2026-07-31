@@ -167,6 +167,29 @@ describe("ManualCaptureForm", () => {
     expect(retryKey).toBe(firstKey);
   });
 
+  it("keeps an explicit server recovery link on the submitted draft", async () => {
+    const submitCapture = vi.fn().mockResolvedValue(completeReceipt);
+    const recoveryCaptureId =
+      "20000000-0000-4000-8000-000000000099";
+    render(
+      <ManualCaptureForm
+        recoveryCaptureId={recoveryCaptureId}
+        submitCapture={submitCapture}
+      />,
+    );
+    await userEvent.type(screen.getByLabelText("标题"), "Recovered title");
+    await userEvent.type(screen.getByLabelText("正文"), "Recovered body");
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "保存并后台整理" }),
+    );
+
+    await waitFor(() => expect(submitCapture).toHaveBeenCalledOnce());
+    expect(submitCapture.mock.calls[0]?.[0].recoveryCaptureId).toBe(
+      recoveryCaptureId,
+    );
+  });
+
   it("creates a new idempotency key after the draft changes", async () => {
     const submitCapture = vi
       .fn()

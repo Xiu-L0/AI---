@@ -24,6 +24,7 @@ export type BrowserCaptureDraft = {
   completeness: FinalizableCompleteness;
   externalRef: string | null;
   idempotencyKey?: string;
+  recoveryCaptureId?: string;
   messages: readonly CapturedMessage[];
   missingElements: readonly string[];
   rawText: string;
@@ -255,6 +256,9 @@ export async function uploadCapture(
     attachments,
     externalRef: draft.externalRef,
     idempotencyKey,
+    ...(draft.recoveryCaptureId === undefined
+      ? {}
+      : { recoveryCaptureId: draft.recoveryCaptureId }),
     scope: draft.scope,
     sensitivity: draft.sensitivity,
     source: draft.source,

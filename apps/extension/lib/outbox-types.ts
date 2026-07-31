@@ -23,6 +23,12 @@ export type OutboxState =
 
 export type ResumeStage = "preparing" | "uploading" | "finalizing";
 
+export type FailureReportStatus =
+  | "not_applicable"
+  | "pending"
+  | "reported"
+  | "rejected";
+
 export type StoredAttachment = {
   blobKey: string;
   byteSize: number;
@@ -65,6 +71,10 @@ export type OutboxItem = {
   createdAt: string;
   draft: CaptureDraft;
   errorCode: string | null;
+  failureReportAttemptCount?: number;
+  failureReportNextAttemptAt?: string | null;
+  failureReportStatus?: FailureReportStatus;
+  failureReportedAt?: string | null;
   id: string;
   idempotencyKey: string;
   lastError: string | null;

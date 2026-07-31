@@ -97,6 +97,7 @@ export const StartCaptureInputSchema = z
     title: z.string().trim().min(1).max(500),
     sensitivity: SensitivitySchema,
     externalRef: z.string().max(1000).nullable(),
+    recoveryCaptureId: z.uuid().nullable().optional(),
     attachments: z.array(AttachmentManifestSchema).max(50)
   })
   .superRefine((value, context) => {
@@ -265,6 +266,30 @@ export const StartCaptureResultSchema = z.object({
   uploadTargets: z.array(UploadTargetSchema).max(50)
 });
 
+export const CaptureFailureCodeSchema = z.enum([
+  "attachment_manifest_conflict",
+  "capture_already_failed",
+  "capture_conflict",
+  "capture_failed",
+  "capture_id_conflict",
+  "capture_not_found",
+  "idempotency_conflict",
+  "invalid_capture",
+  "invalid_server_response",
+  "storage_upload_failed",
+  "upload_target_mismatch"
+]);
+
+export const ReportCaptureFailureInputSchema = z.object({
+  failureCode: CaptureFailureCodeSchema
+}).strict();
+
+export const ReportCaptureFailureResultSchema = z.object({
+  captureId: z.string().uuid(),
+  captureStatus: z.literal("failed"),
+  failureReason: z.string().trim().min(1).max(2000)
+}).strict();
+
 const CaptureReceiptBaseSchema = z.object({
   captureId: z.string().uuid(),
   sourceItemId: z.string().uuid(),
@@ -337,6 +362,13 @@ export type UploadedAttachment = z.infer<typeof UploadedAttachmentSchema>;
 export type FinalizeCaptureInput = z.infer<typeof FinalizeCaptureInputSchema>;
 export type UploadTarget = z.infer<typeof UploadTargetSchema>;
 export type StartCaptureResult = z.infer<typeof StartCaptureResultSchema>;
+export type ReportCaptureFailureInput = z.infer<
+  typeof ReportCaptureFailureInputSchema
+>;
+export type CaptureFailureCode = z.infer<typeof CaptureFailureCodeSchema>;
+export type ReportCaptureFailureResult = z.infer<
+  typeof ReportCaptureFailureResultSchema
+>;
 export type CaptureReceipt = z.infer<typeof CaptureReceiptSchema>;
 export type FailedCaptureStatus = z.infer<typeof FailedCaptureStatusSchema>;
 export type CaptureStatusResult = z.infer<typeof CaptureStatusResultSchema>;

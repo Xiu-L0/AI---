@@ -4,9 +4,10 @@ import {
   EXTRACT_CHATGPT,
   extractCurrentChatGptPage,
 } from "../lib/chatgpt/content-message";
+import { chatGptMatchPatterns } from "../lib/chatgpt/origins";
 
 export default defineContentScript({
-  matches: ["https://chatgpt.com/*"],
+  matches: chatGptMatchPatterns(),
   main() {
     browser.runtime.onMessage.addListener((message) => {
       if (

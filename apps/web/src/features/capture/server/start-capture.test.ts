@@ -48,6 +48,17 @@ class FakeCaptureStartRepository implements CaptureStartRepository {
     return this.sessions.get(this.key(ownerUserId, idempotencyKey)) ?? null;
   }
 
+  async findCaptureSessionById(
+    _ownerUserId: string,
+    captureId: string,
+  ) {
+    return (
+      [...this.sessions.values()].find(
+        (candidate) => candidate.id === captureId,
+      ) ?? null
+    );
+  }
+
   async createCaptureSession(input: {
     captureId: string;
     expiresAt: string;
@@ -60,6 +71,7 @@ class FakeCaptureStartRepository implements CaptureStartRepository {
       failureReason: null,
       id: input.captureId,
       input: input.capture,
+      resolvedAt: null,
       status: "awaiting_upload",
     };
     this.sessions.set(
@@ -260,6 +272,7 @@ describe("startCaptureWithRepository", () => {
       failureReason: null,
       id: CAPTURE_ID,
       input: baseCapture,
+      resolvedAt: null,
       status: "awaiting_upload",
     });
 
@@ -276,6 +289,64 @@ describe("startCaptureWithRepository", () => {
       expiresAt: "2026-07-29T22:00:00.000Z",
       status: "awaiting_upload",
     });
+  });
+
+  it("creates a new session only for an explicit compatible recovery target", async () => {
+    const originalInput = {
+      ...baseCapture,
+      idempotencyKey: "original-failed-key",
+    };
+    repository.sessions.set(`${OWNER_ID}:${originalInput.idempotencyKey}`, {
+      expiresAt: "2026-07-29T19:59:59.000Z",
+      failureReason: "capture session expired",
+      id: CAPTURE_ID,
+      input: originalInput,
+      resolvedAt: null,
+      status: "failed",
+    });
+    const recoveryId = "20000000-0000-4000-8000-000000000002";
+    const recoveryInput = {
+      ...baseCapture,
+      idempotencyKey: "recovery-capture-key",
+      recoveryCaptureId: CAPTURE_ID,
+    };
+
+    const result = await startCaptureWithRepository(repository, {
+      createCaptureId: () => recoveryId,
+      input: recoveryInput,
+      now: NOW,
+      ownerUserId: OWNER_ID,
+    });
+
+    expect(result.captureId).toBe(recoveryId);
+    expect(
+      repository.sessions.get(`${OWNER_ID}:${recoveryInput.idempotencyKey}`)
+        ?.input.recoveryCaptureId,
+    ).toBe(CAPTURE_ID);
+  });
+
+  it("rejects a recovery link to a finalized session", async () => {
+    repository.sessions.set(`${OWNER_ID}:finalized-original`, {
+      expiresAt: "2026-07-29T22:00:00.000Z",
+      failureReason: null,
+      id: CAPTURE_ID,
+      input: { ...baseCapture, idempotencyKey: "finalized-original" },
+      resolvedAt: null,
+      status: "finalized",
+    });
+
+    await expect(
+      startCaptureWithRepository(repository, {
+        input: {
+          ...baseCapture,
+          idempotencyKey: "invalid-recovery-key",
+          recoveryCaptureId: CAPTURE_ID,
+        },
+        now: NOW,
+        ownerUserId: OWNER_ID,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_recovery" });
+    expect(repository.createCount).toBe(0);
   });
 
   it("removes traversal segments from client ids and file names", async () => {
@@ -312,6 +383,7 @@ describe("startCaptureWithRepository", () => {
       failureReason: null,
       id: CAPTURE_ID,
       input: baseCapture,
+      resolvedAt: null,
       status: "finalized",
     });
 

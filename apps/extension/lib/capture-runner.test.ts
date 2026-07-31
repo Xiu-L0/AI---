@@ -80,12 +80,26 @@ function receipt(
   };
 }
 
-function fakeOutbox(initial = item()) {
+function failureReport() {
+  return {
+    captureId,
+    captureStatus: "failed" as const,
+    failureReason: "The capture could not be completed safely",
+  };
+}
+
+function fakeOutbox(initial = item(), related: OutboxItem[] = []) {
   let current = initial;
+  const relatedById = new Map(related.map((entry) => [entry.id, entry]));
   const events: string[] = [];
   const port: CaptureRunnerOutbox = {
-    async get() {
+    async get(id) {
       events.push("get");
+      if (id !== current.id) {
+        const relatedItem = relatedById.get(id);
+        if (!relatedItem) throw new Error(`Missing related outbox item ${id}`);
+        return relatedItem;
+      }
       return current;
     },
     async markAuthPaused(_id, code, message) {
@@ -100,7 +114,18 @@ function fakeOutbox(initial = item()) {
     },
     async markTerminal(_id, code, message) {
       events.push("terminal");
-      current = { ...current, errorCode: code, lastError: message, state: "terminal" };
+      current = {
+        ...current,
+        errorCode: code,
+        failureReportAttemptCount: 0,
+        failureReportNextAttemptAt:
+          current.captureId === null ? null : now.toISOString(),
+        failureReportStatus:
+          current.captureId === null ? "not_applicable" : "pending",
+        failureReportedAt: null,
+        lastError: message,
+        state: "terminal",
+      };
       return current;
     },
     async mutate(_id, updater) {
@@ -174,6 +199,8 @@ function dependencies(
   const api: CaptureApiClient = {
     finalize:
       apiOverrides.finalize ?? vi.fn(async () => receipt()),
+    reportFailure:
+      apiOverrides.reportFailure ?? vi.fn(async () => failureReport()),
     start: apiOverrides.start ?? vi.fn(async () => startResult()),
     status:
       apiOverrides.status ??
@@ -219,6 +246,7 @@ describe("capture runner", () => {
         rawText: "",
       }),
     );
+    expect(setup.api.reportFailure).not.toHaveBeenCalled();
   });
 
   it("recovers a lost finalize response from a real status receipt", async () => {
@@ -276,6 +304,64 @@ describe("capture runner", () => {
     );
   });
 
+  it("sends the prior server capture id for an explicit terminal recovery", async () => {
+    const terminal = item({
+      captureId,
+      id: "terminal-outbox",
+      state: "terminal",
+    });
+    const recovery = item({ recoveryOfItemId: terminal.id });
+    const setup = dependencies(fakeOutbox(recovery, [terminal]));
+
+    await setup.runner.processOutboxItem(recovery.id, now);
+
+    expect(setup.api.start).toHaveBeenCalledWith(
+      expect.objectContaining({ recoveryCaptureId: captureId }),
+    );
+  });
+
+  it("walks past a local-only terminal ancestor to the nearest server session", async () => {
+    const serverTerminal = item({
+      captureId,
+      id: "server-terminal",
+      state: "terminal",
+    });
+    const localTerminal = item({
+      captureId: null,
+      id: "local-terminal",
+      recoveryOfItemId: serverTerminal.id,
+      state: "terminal",
+    });
+    const recovery = item({ recoveryOfItemId: localTerminal.id });
+    const setup = dependencies(
+      fakeOutbox(recovery, [localTerminal, serverTerminal]),
+    );
+
+    await setup.runner.processOutboxItem(recovery.id, now);
+
+    expect(setup.api.start).toHaveBeenCalledWith(
+      expect.objectContaining({ recoveryCaptureId: captureId }),
+    );
+  });
+
+  it("does not treat a finalized partial screenshot supplement as failed-session recovery", async () => {
+    const partial = item({
+      captureId,
+      id: "partial-outbox",
+      receipt: receipt("partial", ["图片无法读取"]),
+      receiptStoredAt: now.toISOString(),
+      state: "partial",
+    });
+    const supplement = item({ recoveryOfItemId: partial.id });
+    const setup = dependencies(fakeOutbox(supplement, [partial]));
+
+    await setup.runner.processOutboxItem(supplement.id, now);
+
+    expect(setup.api.start).toHaveBeenCalledWith(
+      expect.not.objectContaining({ recoveryCaptureId: expect.anything() }),
+    );
+  });
+
   it("pauses an item when extension authentication expires", async () => {
     const setup = dependencies(fakeOutbox(), {
       start: vi.fn(async () => {
@@ -302,6 +388,7 @@ describe("capture runner", () => {
 
       expect(result.state).toBe("terminal");
       expect(result.receipt).toBeNull();
+      expect(setup.api.reportFailure).not.toHaveBeenCalled();
     },
   );
 
@@ -354,6 +441,7 @@ describe("capture runner", () => {
       finalize: vi.fn(async (_captureId, input) =>
         receipt("partial", input.missingElements),
       ),
+      reportFailure: vi.fn(async () => failureReport()),
       start: vi.fn(async () => startResult()),
       status: vi.fn(),
     };
@@ -383,6 +471,7 @@ describe("capture runner", () => {
       const outbox = fakeOutbox(pendingImageItem());
       const api: CaptureApiClient = {
         finalize: vi.fn(),
+        reportFailure: vi.fn(async () => failureReport()),
         start: vi.fn(async () => startResult()),
         status: vi.fn(),
       };
@@ -409,6 +498,7 @@ describe("capture runner", () => {
     const outbox = fakeOutbox(pendingImageItem());
     const api: CaptureApiClient = {
       finalize: vi.fn(),
+      reportFailure: vi.fn(async () => failureReport()),
       start: vi.fn(async () => startResult()),
       status: vi.fn(),
     };
@@ -443,6 +533,7 @@ describe("capture runner", () => {
         finalize: vi.fn(async (_captureId, input) =>
           receipt("partial", input.missingElements),
         ),
+        reportFailure: vi.fn(async () => failureReport()),
         start: vi.fn(async () => startResult()),
         status: vi.fn(),
       };
@@ -475,6 +566,7 @@ describe("capture runner", () => {
       finalize: vi.fn(async (_captureId, input) =>
         receipt("partial", input.missingElements),
       ),
+      reportFailure: vi.fn(async () => failureReport()),
       start: vi.fn(async () => startResult()),
       status: vi.fn(),
     };
@@ -515,6 +607,7 @@ describe("capture runner", () => {
       finalize: vi.fn(async (_captureId, input) =>
         receipt("partial", input.missingElements),
       ),
+      reportFailure: vi.fn(async () => failureReport()),
       start: vi.fn(async () => startResult()),
       status: vi.fn(),
     };
@@ -548,6 +641,7 @@ describe("capture runner", () => {
     }));
     const api: CaptureApiClient = {
       finalize: vi.fn(async () => ({ ...receipt(), savedAttachmentCount: 1 })),
+      reportFailure: vi.fn(async () => failureReport()),
       start: vi.fn(async () => ({
         captureId,
         uploadTargets: [
@@ -587,6 +681,7 @@ describe("capture runner", () => {
       finalize: vi.fn(async (_captureId, input) =>
         receipt("partial", input.missingElements),
       ),
+      reportFailure: vi.fn(async () => failureReport()),
       start: vi.fn(async () => startResult()),
       status: vi.fn(),
     };
@@ -628,7 +723,13 @@ describe("capture runner", () => {
         ],
       },
     });
-    const setup = dependencies(fakeOutbox(frozen), {
+    const outbox = fakeOutbox(frozen);
+    const reportFailure = vi.fn(async () => {
+      outbox.events.push("report-failure");
+      return failureReport();
+    });
+    const setup = dependencies(outbox, {
+      reportFailure,
       start: vi.fn(async () => ({
         captureId,
         uploadTargets: [
@@ -645,6 +746,94 @@ describe("capture runner", () => {
 
     expect(result.state).toBe("terminal");
     expect(result.errorCode).toBe("upload_target_mismatch");
+    expect(result.failureReportStatus).toBe("reported");
+    expect(reportFailure).toHaveBeenCalledWith(captureId, {
+      failureCode: "upload_target_mismatch",
+    });
+    expect(outbox.events.indexOf("terminal")).toBeLessThan(
+      outbox.events.indexOf("report-failure"),
+    );
+  });
+
+  it("retries only failure reporting after a transient report network error", async () => {
+    const frozen = item({
+      draft: {
+        ...item().draft,
+        attachments: [
+          {
+            blobKey: "blob-1",
+            byteSize: 12,
+            clientId: "image-1",
+            fileName: "image-1.png",
+            mimeType: "image/png",
+            sha256: "a".repeat(64),
+          },
+        ],
+      },
+    });
+    const reportFailure = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("offline"))
+      .mockResolvedValueOnce(failureReport());
+    const setup = dependencies(fakeOutbox(frozen), {
+      reportFailure,
+      start: vi.fn(async () => ({
+        captureId,
+        uploadTargets: [],
+      })),
+    });
+
+    const first = await setup.runner.processOutboxItem(frozen.id, now);
+
+    expect(first.state).toBe("terminal");
+    expect(first.receipt).toBeNull();
+    expect(first.failureReportStatus).toBe("pending");
+    expect(first.failureReportAttemptCount).toBe(1);
+    expect(first.failureReportNextAttemptAt).toBe(
+      new Date(now.getTime() + 30_000).toISOString(),
+    );
+
+    const retried = await setup.runner.processOutboxItem(
+      frozen.id,
+      new Date(now.getTime() + 30_000),
+    );
+
+    expect(retried.state).toBe("terminal");
+    expect(retried.receipt).toBeNull();
+    expect(retried.failureReportStatus).toBe("reported");
+    expect(retried.failureReportedAt).toBe(
+      new Date(now.getTime() + 30_000).toISOString(),
+    );
+    expect(reportFailure).toHaveBeenCalledTimes(2);
+    expect(setup.api.start).toHaveBeenCalledTimes(1);
+    expect(setup.api.finalize).not.toHaveBeenCalled();
+  });
+
+  it("settles a deterministic failure-report conflict without inventing success", async () => {
+    const terminal = item({
+      captureId,
+      errorCode: "invalid_capture",
+      failureReportNextAttemptAt: now.toISOString(),
+      failureReportStatus: "pending",
+      state: "terminal",
+    });
+    const setup = dependencies(fakeOutbox(terminal), {
+      reportFailure: vi.fn(async () => {
+        throw new ExtensionApiError({
+          code: "capture_failure_conflict",
+          status: 409,
+        });
+      }),
+    });
+
+    const result = await setup.runner.processOutboxItem(terminal.id, now);
+
+    expect(result.state).toBe("terminal");
+    expect(result.receipt).toBeNull();
+    expect(result.failureReportStatus).toBe("rejected");
+    expect(result.failureReportedAt).toBeNull();
+    expect(setup.api.start).not.toHaveBeenCalled();
+    expect(setup.api.finalize).not.toHaveBeenCalled();
   });
 
   it("terminates deterministic signed-upload client errors", async () => {
@@ -668,6 +857,7 @@ describe("capture runner", () => {
     const outbox = fakeOutbox(frozen);
     const api: CaptureApiClient = {
       finalize: vi.fn(),
+      reportFailure: vi.fn(async () => failureReport()),
       start: vi.fn(async () => ({
         captureId,
         uploadTargets: [
@@ -720,6 +910,7 @@ describe("capture runner", () => {
     const upload = vi.fn();
     const api: CaptureApiClient = {
       finalize: vi.fn(),
+      reportFailure: vi.fn(async () => failureReport()),
       start: vi.fn(async () => ({
         captureId,
         uploadTargets: [

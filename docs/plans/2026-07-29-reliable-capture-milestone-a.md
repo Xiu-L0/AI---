@@ -6,7 +6,7 @@
 
 **Architecture:** Use a pnpm TypeScript monorepo with a Next.js App Router Web application, a WXT Manifest V3 extension, shared Zod contracts, pure domain modules, and Supabase Auth/Postgres/private Storage. Capture uses a two-phase protocol: create a capture session and signed attachment uploads, then finalize in one database transaction that creates the source version and queued processing job. The extension keeps outbox metadata in `chrome.storage.local` and attachment bytes in extension-owned IndexedDB until finalization returns a durable receipt.
 
-**Tech Stack:** Node.js 20.9 or newer, pnpm workspaces, TypeScript, Next.js App Router, React, Tailwind CSS, WXT Manifest V3, Supabase Auth/Postgres/Storage, Zod, Vitest, Testing Library, Playwright.
+**Tech Stack:** Node.js 22.12 or newer, pnpm 11.9 workspaces, TypeScript, Next.js App Router, React, Tailwind CSS, WXT Manifest V3, Supabase Auth/Postgres/Storage, Zod, Vitest, Testing Library, Playwright. The baseline was raised during Task 1 to match the scaffolded Next.js/WXT dependency requirements; the root `package.json` and lockfile are the executable source of truth.
 
 ## Global Constraints
 
@@ -149,9 +149,9 @@ Create the root `package.json`:
 {
   "name": "recall-ai",
   "private": true,
-  "packageManager": "pnpm@10",
+  "packageManager": "pnpm@11.9.0",
   "engines": {
-    "node": ">=20.9.0"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "build": "pnpm -r build",
@@ -2311,8 +2311,23 @@ git commit -m "feat: persist failed captures and retry honestly"
 ### Task 11: Add Capture History, Exception Recovery, and Milestone A End-to-End Verification
 
 **Files:**
+- Modify: `packages/contracts/src/capture.ts`
+- Modify: `apps/web/src/features/capture/server/start-capture.ts`
+- Modify: `apps/web/src/features/capture/client/upload-capture.ts`
+- Modify: `apps/extension/lib/capture-runner.ts`
+- Modify: `apps/extension/lib/outbox-types.ts`
+- Modify: `apps/extension/lib/outbox.ts`
+- Modify: `apps/extension/lib/background-controller.ts`
+- Create: `supabase/migrations/202607290004_capture_session_recovery.sql`
+- Create: `supabase/migrations/202607290005_recovery_single_winner.sql`
+- Create: `supabase/migrations/202607290006_report_capture_failure.sql`
+- Create: `supabase/tests/004_capture_recovery.test.sql`
+- Create: `supabase/tests/005_recovery_single_winner.test.sql`
+- Create: `supabase/tests/006_capture_failure_reporting.test.sql`
 - Create: `apps/web/src/features/capture/server/list-captures.ts`
 - Create: `apps/web/src/features/capture/server/list-exceptions.ts`
+- Create: `apps/web/src/features/capture/server/report-capture-failure.ts`
+- Create: `apps/web/src/app/api/captures/[captureId]/fail/route.ts`
 - Create: `apps/web/src/app/(app)/captures/page.tsx`
 - Create: `apps/web/src/app/(app)/captures/[sourceItemId]/page.tsx`
 - Create: `apps/web/src/app/(app)/exceptions/page.tsx`
@@ -2328,6 +2343,8 @@ git commit -m "feat: persist failed captures and retry honestly"
 - Produces:
   - history list with source, title, capture status, processing status, counts, and time;
   - exception list with missing/failure reason and recovery action;
+  - owner-scoped `POST /api/captures/[captureId]/fail` for converting a real `awaiting_upload` server session to `failed` without creating a success receipt;
+  - persistent extension failure-report retry state that retries only server failure reporting, never the already-terminal capture upload/finalize path;
   - automated end-to-end evidence for complete, partial, duplicate, unauthorized, and network-failure paths.
 
 - [ ] **Step 1: Write a failing exception-page test**
@@ -2341,7 +2358,9 @@ test("partial capture remains visible until resolved", async ({ page }) => {
   await page.goto("/exceptions");
   await expect(page.getByText("部分内容未采集")).toBeVisible();
   await expect(page.getByText("2 张图片无法读取")).toBeVisible();
-  await expect(page.getByRole("button", { name: "补充截图" })).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "手动上传新截图" })
+  ).toBeVisible();
 });
 ```
 
@@ -2355,6 +2374,14 @@ test("partial capture remains visible until resolved", async ({ page }) => {
 - failed capture sessions;
 - processing jobs with `failed`;
 - no records from other owners.
+
+Failed sessions that are recovered through a new capture use an explicit `recovery_of_capture_session_id` link. The new session must belong to the same owner and match the original source, scope, and external reference. Only durable finalization records `resolved_at` and `resolved_by_capture_session_id`; title/time heuristics must never hide a failed session.
+
+If multiple recovery sessions already reference the same failed session, finalization must lock and re-check the recovery target. Only the first durable finalization may resolve it; a later sibling must roll back without creating a second source version or replacing a complete latest version with a late partial version.
+
+When the extension has already persisted a real server `captureId` and then reaches a deterministic terminal error, it first persists the local terminal outbox state and then calls the authenticated failure-report endpoint with a strict, machine-readable failure code. The Web server maps that code to a fixed safe reason and the database atomically allows only the same owner to change an unresolved `awaiting_upload` session to `failed`. Finalized, already-failed, resolved, missing, and other-owner sessions cannot be overwritten.
+
+Failure reporting has its own persistent status, attempt count, next-attempt time, and reported timestamp. A network, authentication, rate-limit, or server failure keeps the capture terminal and schedules only the failure report for retry using the normal backoff sequence. It must not rerun `/captures/start`, attachment upload, or finalization, and it must never create a synthetic receipt. Deterministic `404`/`409` rejection remains terminal and is recorded separately from a successful failure report.
 
 A purely offline extension draft that never reached `/captures/start` has no server session or version, so it remains visible only in the extension outbox. The Web exception list includes it only after a real server session or version exists; it must not fabricate server-side failure rows from extension-local state.
 
@@ -2380,7 +2407,8 @@ Exception card fields:
 - failure or missing-element list;
 - whether raw data is already safe;
 - `在扩展中重试` guidance for extension failures;
-- upload supplement action for partial captures;
+- ChatGPT partials direct the user back to the extension screenshot flow; a generic manual upload is labeled as an independent new source and must not claim to resolve the original partial;
+- manual failed sessions provide an explicit “重新填写并恢复” link that carries the exact failed capture id;
 - no dismiss action for unresolved failed captures in Milestone A.
 
 - [ ] **Step 4: Build the Playwright extension fixture**
@@ -2456,7 +2484,7 @@ pnpm e2e
 git diff --check
 ```
 
-Expected: all automated checks pass.
+Expected: all non-destructive automated checks pass. A local `supabase db reset` may be recorded as `BLOCKED` when preserving unconfirmed local data is required; in that case, do not bypass the protection. Apply pending migrations non-destructively, run every pgTAP test, and record the clean-reset gap explicitly in the acceptance report.
 
 - [ ] **Step 8: Inspect the built extension and secret surface**
 
@@ -2477,7 +2505,7 @@ Open the generated manifest and verify:
 - [ ] **Step 9: Commit the Milestone A vertical slice**
 
 ```bash
-git add apps/web tests docs/runbooks
+git add apps packages/contracts supabase tests docs
 git commit -m "feat: complete reliable capture milestone"
 ```
 

@@ -4,6 +4,8 @@ import {
   ExchangePairingCodeInputSchema,
   ExchangePairingCodeResultSchema,
   FinalizeCaptureInputSchema,
+  ReportCaptureFailureInputSchema,
+  ReportCaptureFailureResultSchema,
   StartCaptureInputSchema,
   StartCaptureResultSchema,
   type CaptureReceipt,
@@ -11,6 +13,8 @@ import {
   type ExchangePairingCodeInput,
   type ExtensionCredential,
   type FinalizeCaptureInput,
+  type ReportCaptureFailureInput,
+  type ReportCaptureFailureResult,
   type StartCaptureInput,
   type StartCaptureResult,
 } from "@recall/contracts";
@@ -25,6 +29,10 @@ export interface CaptureApiClient {
     input: FinalizeCaptureInput,
   ): Promise<CaptureReceipt>;
   status(captureId: string): Promise<CaptureStatusResult>;
+  reportFailure(
+    captureId: string,
+    input: ReportCaptureFailureInput,
+  ): Promise<ReportCaptureFailureResult>;
 }
 
 const ExtensionApiErrorCodeSchema = z.enum([
@@ -32,6 +40,7 @@ const ExtensionApiErrorCodeSchema = z.enum([
   "capture_already_failed",
   "capture_already_finalized",
   "capture_conflict",
+  "capture_failure_conflict",
   "capture_not_finalized",
   "capture_not_found",
   "capture_session_expired",
@@ -50,6 +59,8 @@ const CaptureIdSchema = z.string().uuid();
 const RequestIdSchema = z.string().trim().min(1).max(500);
 
 const safeErrorMessages: Record<ExtensionApiErrorCode, string> = {
+  capture_failure_conflict:
+    "The capture session state no longer accepts failure reporting",
   authentication_required: "扩展连接已失效，请重新配对",
   capture_already_failed: "该采集会话已经失败，需要重新采集",
   capture_already_finalized: "服务器已经保存该采集，正在恢复回执",
@@ -203,7 +214,7 @@ export async function exchangeExtensionPairingCode(
       apiOrigin: apiOrigin(dependencies.apiOrigin),
       authenticated: false,
       clearCredential: async () => undefined,
-      fetch: dependencies.fetch ?? globalThis.fetch,
+      fetch: dependencies.fetch ?? globalThis.fetch.bind(globalThis),
     },
   );
   return ExchangePairingCodeResultSchema.parse(payload);
@@ -217,7 +228,7 @@ export function createCaptureApiClient(
     apiOrigin: apiOrigin(dependencies.apiOrigin),
     authenticated: true,
     clearCredential: dependencies.clearCredential ?? clearExtensionCredential,
-    fetch: dependencies.fetch ?? globalThis.fetch,
+    fetch: dependencies.fetch ?? globalThis.fetch.bind(globalThis),
   };
   const headers = () =>
     new Headers({
@@ -257,6 +268,19 @@ export function createCaptureApiClient(
         await requestJson(
           `/api/captures/${encodeURIComponent(captureId)}/status`,
           { headers: headers(), method: "GET" },
+          resolved,
+        ),
+      );
+    },
+    async reportFailure(captureId, input) {
+      return ReportCaptureFailureResultSchema.parse(
+        await requestJson(
+          `/api/captures/${encodeURIComponent(captureId)}/fail`,
+          {
+            body: JSON.stringify(ReportCaptureFailureInputSchema.parse(input)),
+            headers: headers(),
+            method: "POST",
+          },
           resolved,
         ),
       );

@@ -7,6 +7,7 @@ import {
 import type { CaptureApiClient } from "./api-client";
 import type { AttachmentStore } from "./attachment-store";
 import type { ExtractChatGptResponse } from "./chatgpt/content-message";
+import { chatGptConversationRef } from "./chatgpt/origins";
 import { toChatGptCaptureDraft } from "./chatgpt/to-capture-draft";
 import type { CaptureDraft, OutboxItem } from "./outbox-types";
 import {
@@ -22,6 +23,13 @@ import {
 export const CAPTURE_RETRY_ALARM = "recall.capture.retry";
 export const CAPTURE_NOTIFICATION_PREFIX = "recall.capture.unresolved.";
 const CAPTURE_WATCHDOG_DELAY_MS = 30 * 1_000;
+const FAILURE_REPORT_RETRY_DELAYS_MS = [
+  30 * 1_000,
+  2 * 60 * 1_000,
+  10 * 60 * 1_000,
+  60 * 60 * 1_000,
+  6 * 60 * 60 * 1_000,
+] as const;
 
 type BrowserTab = {
   id: number;
@@ -73,16 +81,7 @@ export type BackgroundControllerDependencies = {
 };
 
 function conversationRef(urlValue: string): string | null {
-  try {
-    const url = new URL(urlValue);
-    if (url.origin !== "https://chatgpt.com") return null;
-    const match = url.pathname.match(/^\/c\/([^/?#]+)/);
-    if (!match?.[1]) return null;
-    const decoded = decodeURIComponent(match[1]).trim();
-    return decoded.length > 0 && decoded.length <= 500 ? decoded : null;
-  } catch {
-    return null;
-  }
+  return chatGptConversationRef(urlValue);
 }
 
 function safeErrorName(error: unknown): string {
@@ -139,6 +138,13 @@ async function dataUrlBlob(value: string): Promise<Blob> {
 
 function due(item: OutboxItem, now: Date): boolean {
   if (item.state === "uploading" || item.state === "finalizing") return true;
+  if (item.state === "terminal" && item.failureReportStatus === "pending") {
+    return (
+      item.failureReportNextAttemptAt === null ||
+      item.failureReportNextAttemptAt === undefined ||
+      new Date(item.failureReportNextAttemptAt).getTime() <= now.getTime()
+    );
+  }
   if (item.state !== "pending" && item.state !== "retry_wait") return false;
   return (
     item.nextAttemptAt === null ||
@@ -158,6 +164,15 @@ function nextRetryAt(
       item.state === "finalizing"
     ) {
       return [currentTime.getTime() + CAPTURE_WATCHDOG_DELAY_MS];
+    }
+    if (
+      item.state === "terminal" &&
+      item.failureReportStatus === "pending" &&
+      item.failureReportNextAttemptAt !== null &&
+      item.failureReportNextAttemptAt !== undefined
+    ) {
+      const time = new Date(item.failureReportNextAttemptAt).getTime();
+      return Number.isFinite(time) ? [time] : [];
     }
     if (
       (item.state !== "pending" && item.state !== "retry_wait") ||
@@ -269,13 +284,45 @@ export function createBackgroundController(
               `Recall capture retry failed before state persistence (${safeErrorName(error)})`,
             );
             try {
-              const failed = await dependencies.outbox.markRetry(
+              if (
+                item.state === "terminal" &&
+                item.failureReportStatus === "pending"
+              ) {
+                await dependencies.outbox.mutate(
+                  item.id,
+                  (current) => {
+                    const attemptCount =
+                      (current.failureReportAttemptCount ?? 0) + 1;
+                    const retryDelay =
+                      FAILURE_REPORT_RETRY_DELAYS_MS[
+                        Math.min(
+                          attemptCount - 1,
+                          FAILURE_REPORT_RETRY_DELAYS_MS.length - 1,
+                        )
+                      ]!;
+                    return {
+                      ...current,
+                      failureReportAttemptCount: attemptCount,
+                      failureReportNextAttemptAt: new Date(
+                        currentTime.getTime() + retryDelay,
+                      ).toISOString(),
+                      failureReportStatus: "pending",
+                      failureReportedAt: null,
+                      nextAttemptAt: null,
+                      state: "terminal",
+                    };
+                  },
+                  currentTime,
+                );
+              } else {
+                const failed = await dependencies.outbox.markRetry(
                 item.id,
                 "capture_runner_failed",
                 "采集执行器暂时无法继续，扩展会自动重试",
                 currentTime,
               );
-              await notifyIfNeeded(failed, currentTime);
+                await notifyIfNeeded(failed, currentTime);
+              }
             } catch (persistenceError) {
               watchdogItemIds.add(item.id);
               console.error(

@@ -3,6 +3,7 @@ import {
   FinalizeCaptureInputSchema,
   StartCaptureInputSchema,
   type AttachmentMimeType,
+  type CaptureFailureCode,
   type CaptureReceipt,
   type CaptureStatusResult,
   type StartCaptureInput,
@@ -17,6 +18,7 @@ import {
   type CaptureApiClient,
 } from "./api-client";
 import type { AttachmentStore } from "./attachment-store";
+import { testFixtureOrigin } from "./chatgpt/origins";
 import type { OutboxItem, StoredAttachment } from "./outbox-types";
 import {
   StorageUploadError,
@@ -30,6 +32,26 @@ const SUPPORTED_IMAGE_MIME_TYPES = new Set<AttachmentMimeType>([
   "image/png",
   "image/jpeg",
   "image/webp",
+]);
+const FAILURE_REPORT_RETRY_DELAYS_MS = [
+  30 * 1_000,
+  2 * 60 * 1_000,
+  10 * 60 * 1_000,
+  60 * 60 * 1_000,
+  6 * 60 * 60 * 1_000,
+] as const;
+const REPORTABLE_FAILURE_CODES = new Set<CaptureFailureCode>([
+  "attachment_manifest_conflict",
+  "capture_already_failed",
+  "capture_conflict",
+  "capture_failed",
+  "capture_id_conflict",
+  "capture_not_found",
+  "idempotency_conflict",
+  "invalid_capture",
+  "invalid_server_response",
+  "storage_upload_failed",
+  "upload_target_mismatch",
 ]);
 
 export type CaptureRunnerOutbox = {
@@ -214,9 +236,7 @@ function safeRemoteImageUrl(
     }
     return url;
   }
-  const testOrigin = import.meta.env.WXT_TEST_FIXTURE_ORIGIN;
-  const isLocalTestOrigin =
-    testOrigin !== undefined && url.origin === configuredOrigin(testOrigin, testOrigin);
+  const isLocalTestOrigin = url.origin === testFixtureOrigin();
   if (
     url.protocol !== "https:" &&
     !isLocalTestOrigin &&
@@ -293,7 +313,23 @@ function missingImageDescription(messageOrdinal: number, reason: string): string
   );
 }
 
-function startInput(item: OutboxItem): StartCaptureInput {
+async function startInput(
+  item: OutboxItem,
+  outbox: Pick<CaptureRunnerOutbox, "get">,
+): Promise<StartCaptureInput> {
+  let recoveryCaptureId: string | null = null;
+  let ancestorId = item.recoveryOfItemId;
+  const visited = new Set<string>();
+  while (ancestorId !== null && !visited.has(ancestorId)) {
+    visited.add(ancestorId);
+    const ancestor = await outbox.get(ancestorId);
+    if (ancestor.state !== "terminal") break;
+    if (ancestor.captureId !== null) {
+      recoveryCaptureId = ancestor.captureId;
+      break;
+    }
+    ancestorId = ancestor.recoveryOfItemId;
+  }
   return {
     attachments: item.draft.attachments.map(
       ({ clientId, fileName, mimeType, byteSize, sha256: hash }) => ({
@@ -306,6 +342,7 @@ function startInput(item: OutboxItem): StartCaptureInput {
     ),
     externalRef: item.draft.externalRef,
     idempotencyKey: item.idempotencyKey,
+    ...(recoveryCaptureId === null ? {} : { recoveryCaptureId }),
     scope: item.draft.scope,
     sensitivity: item.draft.sensitivity,
     source: item.draft.source,
@@ -466,6 +503,7 @@ async function handleFailure(
   error: unknown,
   dependencies: CaptureRunnerDependencies,
   now: Date,
+  api?: CaptureApiClient,
 ): Promise<OutboxItem> {
   const code = errorCode(error);
   const message = readableError(error);
@@ -473,9 +511,112 @@ async function handleFailure(
     return dependencies.outbox.markAuthPaused(itemId, code, message, now);
   }
   if (isTerminalApiError(error)) {
-    return dependencies.outbox.markTerminal(itemId, code, message, now);
+    return markTerminalAndReport(itemId, code, message, dependencies, now, api);
   }
   return dependencies.outbox.markRetry(itemId, code, message, now);
+}
+
+function reportableFailureCode(code: string | null): CaptureFailureCode {
+  return code !== null && REPORTABLE_FAILURE_CODES.has(code as CaptureFailureCode)
+    ? (code as CaptureFailureCode)
+    : "capture_failed";
+}
+
+function isRetryableFailureReportError(error: unknown): boolean {
+  if (!(error instanceof ExtensionApiError)) return true;
+  return (
+    error.status === 0 ||
+    error.status === 401 ||
+    error.status === 408 ||
+    error.status === 425 ||
+    error.status === 429 ||
+    error.status >= 500
+  );
+}
+
+async function reportTerminalFailure(
+  terminal: OutboxItem,
+  api: CaptureApiClient,
+  dependencies: CaptureRunnerDependencies,
+  now: Date,
+): Promise<OutboxItem> {
+  if (
+    terminal.captureId === null ||
+    terminal.failureReportStatus !== "pending"
+  ) {
+    return terminal;
+  }
+
+  try {
+    await api.reportFailure(terminal.captureId, {
+      failureCode: reportableFailureCode(terminal.errorCode),
+    });
+    return dependencies.outbox.mutate(
+      terminal.id,
+      (current) => ({
+        ...current,
+        failureReportNextAttemptAt: null,
+        failureReportStatus: "reported",
+        failureReportedAt: now.toISOString(),
+      }),
+      now,
+    );
+  } catch (error) {
+    if (!isRetryableFailureReportError(error)) {
+      return dependencies.outbox.mutate(
+        terminal.id,
+        (current) => ({
+          ...current,
+          failureReportNextAttemptAt: null,
+          failureReportStatus: "rejected",
+          failureReportedAt: null,
+        }),
+        now,
+      );
+    }
+    return dependencies.outbox.mutate(
+      terminal.id,
+      (current) => {
+        const attemptCount = (current.failureReportAttemptCount ?? 0) + 1;
+        const retryDelay =
+          FAILURE_REPORT_RETRY_DELAYS_MS[
+            Math.min(
+              attemptCount - 1,
+              FAILURE_REPORT_RETRY_DELAYS_MS.length - 1,
+            )
+          ]!;
+        return {
+          ...current,
+          failureReportAttemptCount: attemptCount,
+          failureReportNextAttemptAt: new Date(
+            now.getTime() + retryDelay,
+          ).toISOString(),
+          failureReportStatus: "pending",
+          failureReportedAt: null,
+        };
+      },
+      now,
+    );
+  }
+}
+
+async function markTerminalAndReport(
+  itemId: string,
+  code: string,
+  message: string,
+  dependencies: CaptureRunnerDependencies,
+  now: Date,
+  api?: CaptureApiClient,
+): Promise<OutboxItem> {
+  const terminal = await dependencies.outbox.markTerminal(
+    itemId,
+    code,
+    message,
+    now,
+  );
+  return api === undefined
+    ? terminal
+    : reportTerminalFailure(terminal, api, dependencies, now);
 }
 
 export function createCaptureRunner(dependencies: CaptureRunnerDependencies) {
@@ -486,14 +627,54 @@ export function createCaptureRunner(dependencies: CaptureRunnerDependencies) {
     if (item.receipt !== null && (item.state === "complete" || item.state === "partial")) {
       return item;
     }
-    if (item.state === "auth_paused" || item.state === "terminal") return item;
+    if (item.state === "auth_paused") return item;
+    if (item.state === "terminal") {
+      if (item.failureReportStatus !== "pending" || item.captureId === null) {
+        return item;
+      }
+      try {
+        const api = await dependencies.getApiClient();
+        return reportTerminalFailure(item, api, dependencies, now);
+      } catch {
+        return dependencies.outbox.mutate(
+          item.id,
+          (current) => {
+            const attemptCount = (current.failureReportAttemptCount ?? 0) + 1;
+            const retryDelay =
+              FAILURE_REPORT_RETRY_DELAYS_MS[
+                Math.min(
+                  attemptCount - 1,
+                  FAILURE_REPORT_RETRY_DELAYS_MS.length - 1,
+                )
+              ]!;
+            return {
+              ...current,
+              failureReportAttemptCount: attemptCount,
+              failureReportNextAttemptAt: new Date(
+                now.getTime() + retryDelay,
+              ).toISOString(),
+            };
+          },
+          now,
+        );
+      }
+    }
 
-    let api: CaptureApiClient;
+    let api: CaptureApiClient | undefined;
     try {
       api = await dependencies.getApiClient();
       item = await prepareAttachments(item, dependencies, now);
     } catch (error) {
-      return handleFailure(itemId, error, dependencies, now);
+      return handleFailure(itemId, error, dependencies, now, api);
+    }
+
+    if (api === undefined) {
+      return dependencies.outbox.markRetry(
+        itemId,
+        "capture_failed",
+        "Capture API client was unavailable",
+        now,
+      );
     }
 
     if (item.state === "finalizing" && item.captureId !== null) {
@@ -504,21 +685,25 @@ export function createCaptureRunner(dependencies: CaptureRunnerDependencies) {
         }
       } catch (error) {
         if (isAuthError(error)) {
-          return handleFailure(itemId, error, dependencies, now);
+          return handleFailure(itemId, error, dependencies, now, api);
         }
         if (!isRetryableApiError(error)) {
-          return handleFailure(itemId, error, dependencies, now);
+          return handleFailure(itemId, error, dependencies, now, api);
         }
       }
     }
 
-    const parsedStartInput = StartCaptureInputSchema.safeParse(startInput(item));
+    const parsedStartInput = StartCaptureInputSchema.safeParse(
+      await startInput(item, dependencies.outbox),
+    );
     if (!parsedStartInput.success) {
-      return dependencies.outbox.markTerminal(
+      return markTerminalAndReport(
         itemId,
         "invalid_capture",
         parsedStartInput.error.issues[0]?.message ?? "Capture manifest is invalid",
+        dependencies,
         now,
+        api,
       );
     }
 
@@ -551,18 +736,20 @@ export function createCaptureRunner(dependencies: CaptureRunnerDependencies) {
             now,
           );
         } catch (statusError) {
-          return handleFailure(itemId, statusError, dependencies, now);
+          return handleFailure(itemId, statusError, dependencies, now, api);
         }
       }
-      return handleFailure(itemId, error, dependencies, now);
+      return handleFailure(itemId, error, dependencies, now, api);
     }
 
     if (item.captureId !== null && item.captureId !== started.captureId) {
-      return dependencies.outbox.markTerminal(
+      return markTerminalAndReport(
         itemId,
         "capture_id_conflict",
         "Server returned a different capture id for the same outbox item",
+        dependencies,
         now,
+        api,
       );
     }
 
@@ -590,11 +777,13 @@ export function createCaptureRunner(dependencies: CaptureRunnerDependencies) {
       targets.size !== item.draft.attachments.length ||
       attachmentIds.some((clientId, index) => clientId !== targetIds[index])
     ) {
-      return dependencies.outbox.markTerminal(
+      return markTerminalAndReport(
         itemId,
         "upload_target_mismatch",
         "Server upload targets do not match the frozen attachment manifest",
+        dependencies,
         now,
+        api,
       );
     }
 
@@ -618,14 +807,16 @@ export function createCaptureRunner(dependencies: CaptureRunnerDependencies) {
           error.message.startsWith("Attachment bytes changed") ||
           error.message.startsWith("Attachment image signature is invalid"))
       ) {
-        return dependencies.outbox.markTerminal(
+        return markTerminalAndReport(
           itemId,
           "attachment_manifest_conflict",
           error.message,
+          dependencies,
           now,
+          api,
         );
       }
-      return handleFailure(itemId, error, dependencies, now);
+      return handleFailure(itemId, error, dependencies, now, api);
     }
 
     item = await dependencies.outbox.mutate(
@@ -643,12 +834,14 @@ export function createCaptureRunner(dependencies: CaptureRunnerDependencies) {
       finalizedInput(item),
     );
     if (!parsedFinalizeInput.success) {
-      return dependencies.outbox.markTerminal(
+      return markTerminalAndReport(
         itemId,
         "invalid_capture",
         parsedFinalizeInput.error.issues[0]?.message ??
           "Capture finalization input is invalid",
+        dependencies,
         now,
+        api,
       );
     }
 
@@ -659,7 +852,7 @@ export function createCaptureRunner(dependencies: CaptureRunnerDependencies) {
       );
       return dependencies.outbox.storeReceipt(itemId, receipt, now);
     } catch (error) {
-      if (isAuthError(error)) return handleFailure(itemId, error, dependencies, now);
+      if (isAuthError(error)) return handleFailure(itemId, error, dependencies, now, api);
       try {
         const status = await probeStatus(api, started.captureId);
         if (status.kind === "receipt") {
@@ -667,10 +860,10 @@ export function createCaptureRunner(dependencies: CaptureRunnerDependencies) {
         }
       } catch (statusError) {
         if (isAuthError(statusError)) {
-          return handleFailure(itemId, statusError, dependencies, now);
+          return handleFailure(itemId, statusError, dependencies, now, api);
         }
       }
-      return handleFailure(itemId, error, dependencies, now);
+      return handleFailure(itemId, error, dependencies, now, api);
     }
   }
 

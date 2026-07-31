@@ -83,6 +83,12 @@ const OutboxItemSchema: z.ZodType<OutboxItem> = z.object({
   createdAt: TimestampSchema,
   draft: CaptureDraftSchema,
   errorCode: z.string().min(1).max(200).nullable(),
+  failureReportAttemptCount: z.number().int().nonnegative().default(0),
+  failureReportNextAttemptAt: NullableTimestampSchema.default(null),
+  failureReportStatus: z
+    .enum(["not_applicable", "pending", "reported", "rejected"])
+    .default("not_applicable"),
+  failureReportedAt: NullableTimestampSchema.default(null),
   id: z.string().trim().min(1).max(200),
   idempotencyKey: z.string().trim().min(8).max(200),
   lastError: z.string().min(1).max(2_000).nullable(),
@@ -143,6 +149,32 @@ const OutboxItemSchema: z.ZodType<OutboxItem> = z.object({
       message: "superseded items must be marked resolved",
       path: ["resolvedAt"],
       input: item.resolvedAt,
+    });
+  }
+  if (item.failureReportStatus === "pending") {
+    if (
+      item.state !== "terminal" ||
+      item.captureId === null ||
+      item.failureReportNextAttemptAt === null ||
+      item.failureReportedAt !== null
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "pending failure reports require a server capture and retry time",
+        path: ["failureReportStatus"],
+        input: item,
+      });
+    }
+  }
+  if (
+    item.failureReportStatus === "reported" &&
+    (item.failureReportedAt === null || item.failureReportNextAttemptAt !== null)
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "reported failures require a report timestamp and no retry",
+      path: ["failureReportedAt"],
+      input: item,
     });
   }
 });
@@ -299,6 +331,10 @@ export async function enqueueDraft(
       createdAt: now,
       draft: parsedDraft,
       errorCode: null,
+      failureReportAttemptCount: 0,
+      failureReportNextAttemptAt: null,
+      failureReportStatus: "not_applicable",
+      failureReportedAt: null,
       id,
       idempotencyKey,
       lastError: null,
@@ -420,16 +456,23 @@ export async function markTerminal(
   message: string,
   options: Pick<OutboxOperationOptions, "now" | "storage"> = {},
 ): Promise<OutboxItem> {
+  const now = resolvedNow(options);
   return mutateOutboxItem(
     id,
     (item) => ({
       ...item,
       errorCode,
+      failureReportAttemptCount: 0,
+      failureReportNextAttemptAt:
+        item.captureId === null ? null : now.toISOString(),
+      failureReportStatus:
+        item.captureId === null ? "not_applicable" : "pending",
+      failureReportedAt: null,
       lastError: message,
       nextAttemptAt: null,
       state: "terminal",
     }),
-    options,
+    { ...options, now },
   );
 }
 
@@ -485,6 +528,9 @@ export async function storeReceipt(
       ...item,
       captureId: parsedReceipt.captureId,
       errorCode: null,
+      failureReportNextAttemptAt: null,
+      failureReportStatus: "not_applicable",
+      failureReportedAt: null,
       lastError: null,
       nextAttemptAt: null,
       receipt: parsedReceipt,

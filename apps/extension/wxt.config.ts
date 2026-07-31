@@ -26,6 +26,22 @@ export function hostPermission(name: string, fallback: string) {
   return `${url.origin}/*`;
 }
 
+export function optionalTestHostPermission(
+  name: string,
+  testBuildName = "WXT_TEST_BUILD",
+) {
+  if (process.env[testBuildName] !== "1") return [];
+  const configured = process.env[name];
+  if (configured === undefined) {
+    throw new Error(`${name} is required for a test extension build`);
+  }
+  const url = new URL(configured);
+  if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
+    throw new Error(`${name} must use an exact loopback origin`);
+  }
+  return [hostPermission(name, configured)];
+}
+
 export default defineConfig({
   manifestVersion: 3,
   modules: ["@wxt-dev/module-react"],
@@ -45,6 +61,7 @@ export default defineConfig({
       "https://chatgpt.com/*",
       hostPermission("WXT_PUBLIC_API_ORIGIN", "http://localhost:3000"),
       hostPermission("WXT_PUBLIC_SUPABASE_URL", "http://127.0.0.1:54321"),
+      ...optionalTestHostPermission("WXT_TEST_FIXTURE_ORIGIN"),
     ],
   },
 });

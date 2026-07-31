@@ -21,6 +21,7 @@ export type CaptureStartErrorCode =
   | "capture_session_expired"
   | "idempotency_conflict"
   | "invalid_capture"
+  | "invalid_recovery"
   | "signed_upload_failed";
 
 export class CaptureStartError extends Error {
@@ -44,6 +45,7 @@ export type CaptureStartSession = {
   expiresAt: string;
   failureReason: string | null;
   input: StartCaptureInput;
+  resolvedAt: string | null;
   status: "awaiting_upload" | "failed" | "finalized";
 };
 
@@ -51,6 +53,10 @@ export interface CaptureStartRepository {
   findCaptureSession(
     ownerUserId: string,
     idempotencyKey: string,
+  ): Promise<CaptureStartSession | null>;
+  findCaptureSessionById(
+    ownerUserId: string,
+    captureId: string,
   ): Promise<CaptureStartSession | null>;
   createCaptureSession(input: {
     captureId: string;
@@ -138,6 +144,7 @@ function comparableCaptureInput(input: StartCaptureInput) {
         sha256: attachment.sha256,
       })),
     externalRef: input.externalRef,
+    recoveryCaptureId: input.recoveryCaptureId ?? null,
     scope: input.scope,
     sensitivity: input.sensitivity,
     source: input.source,
@@ -245,6 +252,13 @@ async function requireReusableSession(
       { captureId: session.id },
     );
   }
+  if (session.resolvedAt !== null) {
+    throw new CaptureStartError(
+      "capture_already_failed",
+      "The capture session was resolved by a later recovery",
+      { captureId: session.id },
+    );
+  }
   const isExpired = new Date(session.expiresAt).getTime() <= now.getTime();
   if (isExpired) {
     const canRenew =
@@ -288,6 +302,35 @@ async function requireReusableSession(
   return session;
 }
 
+async function requireValidRecoveryTarget(
+  repository: CaptureStartRepository,
+  ownerUserId: string,
+  input: StartCaptureInput,
+): Promise<void> {
+  if (input.recoveryCaptureId == null) return;
+
+  const target = await repository.findCaptureSessionById(
+    ownerUserId,
+    input.recoveryCaptureId,
+  );
+  const sameSource =
+    target?.input.source === input.source &&
+    target.input.scope === input.scope &&
+    target.input.externalRef === input.externalRef;
+  if (
+    target === null ||
+    target.status === "finalized" ||
+    target.resolvedAt !== null ||
+    !sameSource
+  ) {
+    throw new CaptureStartError(
+      "invalid_recovery",
+      "The referenced capture session cannot be recovered by this capture",
+      { captureId: input.recoveryCaptureId },
+    );
+  }
+}
+
 export async function startCaptureWithRepository(
   repository: CaptureStartRepository,
   args: StartCaptureArguments,
@@ -314,6 +357,10 @@ export async function startCaptureWithRepository(
     ownerUserId,
     input.idempotencyKey,
   );
+
+  if (existing === null) {
+    await requireValidRecoveryTarget(repository, ownerUserId, input);
+  }
 
   const requestedCaptureId =
     existing === null
@@ -353,6 +400,8 @@ function parseCaptureSession(
     external_ref: string | null;
     id: string;
     idempotency_key: string;
+    recovery_of_capture_session_id: string | null;
+    resolved_at: string | null;
     scope: StartCaptureInput["scope"];
     sensitivity: StartCaptureInput["sensitivity"];
     source: StartCaptureInput["source"];
@@ -370,11 +419,13 @@ function parseCaptureSession(
       ),
       externalRef: row.external_ref,
       idempotencyKey: row.idempotency_key,
+      recoveryCaptureId: row.recovery_of_capture_session_id,
       scope: row.scope,
       sensitivity: row.sensitivity,
       source: row.source,
       title: row.title,
     }),
+    resolvedAt: row.resolved_at,
     status: row.status,
   };
 }
@@ -383,7 +434,7 @@ async function createCaptureStartRepository(): Promise<CaptureStartRepository> {
   const { createAdminClient } = await import("@/lib/supabase/admin");
   const admin = createAdminClient();
   const selection =
-    "id, idempotency_key, source, scope, title, sensitivity, external_ref, expected_attachments, status, failure_reason, expires_at";
+    "id, idempotency_key, source, scope, title, sensitivity, external_ref, expected_attachments, status, failure_reason, expires_at, recovery_of_capture_session_id, resolved_at";
 
   const findCaptureSession: CaptureStartRepository["findCaptureSession"] =
     async (ownerUserId, idempotencyKey) => {
@@ -399,7 +450,7 @@ async function createCaptureStartRepository(): Promise<CaptureStartRepository> {
       }
       return data === null ? null : parseCaptureSession(data);
     };
-  const findCaptureSessionById = async (
+  const findCaptureSessionById: CaptureStartRepository["findCaptureSessionById"] = async (
     ownerUserId: string,
     captureId: string,
   ) => {
@@ -418,6 +469,7 @@ async function createCaptureStartRepository(): Promise<CaptureStartRepository> {
 
   return {
     findCaptureSession,
+    findCaptureSessionById,
     async createCaptureSession({
       capture,
       captureId,
@@ -433,6 +485,7 @@ async function createCaptureStartRepository(): Promise<CaptureStartRepository> {
           id: captureId,
           idempotency_key: capture.idempotencyKey,
           owner_user_id: ownerUserId,
+          recovery_of_capture_session_id: capture.recoveryCaptureId ?? null,
           scope: capture.scope,
           sensitivity: capture.sensitivity,
           source: capture.source,
@@ -497,6 +550,7 @@ async function createCaptureStartRepository(): Promise<CaptureStartRepository> {
         .eq("owner_user_id", ownerUserId)
         .eq("status", "failed")
         .eq("failure_reason", failureReason)
+        .is("resolved_at", null)
         .select(selection)
         .maybeSingle();
 
@@ -539,6 +593,7 @@ async function createCaptureStartRepository(): Promise<CaptureStartRepository> {
         .eq("id", captureId)
         .eq("owner_user_id", ownerUserId)
         .eq("status", previous.status);
+      update = update.is("resolved_at", null);
       update =
         previous.failureReason === null
           ? update.is("failure_reason", null)

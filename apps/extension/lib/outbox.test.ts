@@ -193,6 +193,35 @@ describe("capture outbox", () => {
     ]);
   });
 
+  it("persists a separate failure-report retry for terminal server sessions", async () => {
+    const queued = await enqueueDraft(draft(), options(3));
+    const started = await mutateOutboxItem(
+      queued.id,
+      (current) => ({
+        ...current,
+        captureId: "20000000-0000-4000-8000-000000000003",
+        state: "uploading",
+      }),
+      { now: NOW, storage: fakeBrowser.storage.local },
+    );
+
+    const terminal = await markTerminal(
+      started.id,
+      "upload_target_mismatch",
+      "Needs recovery",
+      { now: NOW, storage: fakeBrowser.storage.local },
+    );
+
+    expect(terminal).toMatchObject({
+      failureReportAttemptCount: 0,
+      failureReportNextAttemptAt: NOW.toISOString(),
+      failureReportStatus: "pending",
+      failureReportedAt: null,
+      nextAttemptAt: null,
+      state: "terminal",
+    });
+  });
+
   it("stores a real receipt and its complete state in one storage write", async () => {
     const item = await enqueueDraft(draft(), options());
     const set = vi.spyOn(fakeBrowser.storage.local, "set");

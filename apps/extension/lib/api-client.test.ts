@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createCaptureApiClient,
@@ -10,6 +10,33 @@ import {
 const token = "a".repeat(43);
 
 describe("CaptureApiClient", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("binds the browser default fetch to the global object", async () => {
+    const defaultFetch = vi.fn(function (this: unknown) {
+      if (this !== globalThis) {
+        throw new TypeError("Illegal invocation");
+      }
+      return Promise.resolve(
+        Response.json({
+          expiresAt: "2026-08-30T00:00:00.000Z",
+          token: "b".repeat(43),
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", defaultFetch);
+
+    await expect(
+      exchangeExtensionPairingCode(
+        { code: "ABCDEFGH", label: "Synthetic Chromium" },
+        { apiOrigin: "http://127.0.0.1:3000" },
+      ),
+    ).resolves.toMatchObject({ token: "b".repeat(43) });
+    expect(defaultFetch).toHaveBeenCalledOnce();
+  });
+
   it("rejects API URLs that are not a base origin", () => {
     expect(() =>
       createCaptureApiClient(token, {
@@ -199,6 +226,64 @@ describe("CaptureApiClient", () => {
     await expect(request).rejects.toEqual(
       expect.objectContaining<Partial<ExtensionApiError>>({
         message: "服务器找不到该采集会话",
+      }),
+    );
+    await expect(request).rejects.not.toThrow("signed-token");
+  });
+
+  it("reports a terminal capture with only the whitelisted failure code", async () => {
+    const captureId = "20000000-0000-4000-8000-000000000001";
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({
+        captureId,
+        captureStatus: "failed",
+        failureReason: "Upload targets did not match the frozen attachment manifest",
+      }),
+    );
+    const client = createCaptureApiClient(token, {
+      apiOrigin: "http://127.0.0.1:3000",
+      fetch: fetchImplementation,
+    });
+
+    await expect(
+      client.reportFailure(captureId, {
+        failureCode: "upload_target_mismatch",
+      }),
+    ).resolves.toMatchObject({ captureId, captureStatus: "failed" });
+
+    const [url, init] = fetchImplementation.mock.calls[0]!;
+    expect(url).toBe(
+      `http://127.0.0.1:3000/api/captures/${captureId}/fail`,
+    );
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      failureCode: "upload_target_mismatch",
+    });
+    expect(String(init?.body)).not.toContain("signed");
+  });
+
+  it("maps failure-report conflicts without retaining an unsafe server message", async () => {
+    const client = createCaptureApiClient(token, {
+      apiOrigin: "http://127.0.0.1:3000",
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(
+        Response.json(
+          {
+            code: "capture_failure_conflict",
+            message: "signed-token=secret C:/private/raw.txt",
+          },
+          { status: 409 },
+        ),
+      ),
+    });
+
+    const request = client.reportFailure(
+      "20000000-0000-4000-8000-000000000001",
+      { failureCode: "invalid_capture" },
+    );
+    await expect(request).rejects.toEqual(
+      expect.objectContaining<Partial<ExtensionApiError>>({
+        code: "capture_failure_conflict",
+        status: 409,
       }),
     );
     await expect(request).rejects.not.toThrow("signed-token");

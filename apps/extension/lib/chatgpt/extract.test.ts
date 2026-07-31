@@ -67,7 +67,7 @@ describe("extractChatGptConversation", () => {
       expect.objectContaining({
         messageExternalId: "synthetic-a2",
         messageOrdinal: 2,
-        src: "https://example.test/generated-fixture.png",
+        src: "https://chatgpt.com/generated-fixture.png",
         width: 64,
         height: 64,
       }),
