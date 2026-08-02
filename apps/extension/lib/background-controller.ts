@@ -192,16 +192,32 @@ function screenshotRecoveryDraft(
 ): CaptureDraft {
   return {
     ...original.draft,
-    attachments: [...original.draft.attachments, attachment],
-    completeness: "partial",
+    attachments: [attachment],
+    completeness: "complete",
+    missingElements: [],
     pendingImages: [],
   };
+}
+
+function isScreenshotRecoveryChild(
+  item: OutboxItem,
+  originalId: string,
+): boolean {
+  return (
+    item.recoveryOfItemId === originalId &&
+    item.draft.source === "chatgpt_web" &&
+    item.draft.pendingImages.length === 0 &&
+    item.draft.attachments.some((attachment) =>
+      attachment.clientId.startsWith("recovery-screenshot-"),
+    )
+  );
 }
 
 export function createBackgroundController(
   dependencies: BackgroundControllerDependencies,
 ) {
   const now = () => dependencies.now?.() ?? new Date();
+  const screenshotRecoveryFlights = new Map<string, Promise<OutboxItem>>();
 
   async function synchronizeUiAndAlarm(
     activeItemIds: ReadonlySet<string> = new Set(),
@@ -531,10 +547,16 @@ export function createBackgroundController(
     }
   }
 
-  async function addScreenshotRecovery(itemId: string) {
+  async function performScreenshotRecovery(itemId: string) {
     const original = await dependencies.outbox.get(itemId);
     if (original.state !== "partial" || original.receipt === null) {
       throw new Error("只有已确认的部分采集可以补充截图");
+    }
+    const existingRecovery = (await dependencies.outbox.list()).find((item) =>
+      isScreenshotRecoveryChild(item, original.id),
+    );
+    if (existingRecovery !== undefined) {
+      return existingRecovery;
     }
     const tab = await dependencies.getActiveTab();
     if (
@@ -545,16 +567,6 @@ export function createBackgroundController(
     }
     const blob = await dataUrlBlob(await dependencies.captureVisibleTab(tab.windowId));
     if (blob.size > 10 * 1024 * 1024) throw new Error("截图超过 10 MiB");
-    if (original.draft.attachments.length >= 50) {
-      throw new Error("本次采集已达到 50 个附件上限");
-    }
-    const existingBytes = original.draft.attachments.reduce(
-      (sum, attachment) => sum + attachment.byteSize,
-      0,
-    );
-    if (existingBytes + blob.size > 100 * 1024 * 1024) {
-      throw new Error("本次附件总量超过 100 MiB");
-    }
 
     const id = dependencies.createId?.() ?? crypto.randomUUID();
     const hash = await sha256(blob);
@@ -583,6 +595,23 @@ export function createBackgroundController(
       return processed;
     } finally {
       await synchronizeUiAndAlarmSafely();
+    }
+  }
+
+  async function addScreenshotRecovery(itemId: string): Promise<OutboxItem> {
+    const existingFlight = screenshotRecoveryFlights.get(itemId);
+    if (existingFlight !== undefined) {
+      return existingFlight;
+    }
+
+    const flight = performScreenshotRecovery(itemId);
+    screenshotRecoveryFlights.set(itemId, flight);
+    try {
+      return await flight;
+    } finally {
+      if (screenshotRecoveryFlights.get(itemId) === flight) {
+        screenshotRecoveryFlights.delete(itemId);
+      }
     }
   }
 

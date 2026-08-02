@@ -516,7 +516,118 @@ describe("background controller", () => {
     expect(test.items[0]?.receipt).toBeNull();
   });
 
-  it("creates screenshot recovery with the same ChatGPT source and external ref", async () => {
+  it("completes a partial capture with exactly one fresh screenshot", async () => {
+    const originalReceipt = receipt("partial");
+    const inherited = {
+      blobKey: "old-screenshot-blob",
+      byteSize: 123,
+      clientId: "old-screenshot",
+      fileName: "old-screenshot.png",
+      mimeType: "image/png" as const,
+      sha256: "a".repeat(64),
+    };
+    const original = outboxItem({
+      captureId,
+      draft: {
+        ...draft(),
+        attachments: [inherited],
+        completeness: "partial",
+        missingElements: originalReceipt.missingElements,
+      },
+      receipt: originalReceipt,
+      receiptStoredAt: fixedNow.toISOString(),
+      state: "partial",
+    });
+    const test = setup([original]);
+    test.process.mockImplementation(async (id: string) =>
+      test.dependencies.outbox.mutate(
+        id,
+        (item) => ({
+          ...item,
+          captureId,
+          receipt: receipt("complete"),
+          receiptStoredAt: fixedNow.toISOString(),
+          resolvedAt: fixedNow.toISOString(),
+          state: "complete",
+        }),
+        fixedNow,
+      ),
+    );
+
+    const result = await test.controller.addScreenshotRecovery(original.id);
+    const recovery = test.items.find((item) => item.id === result.id)!;
+
+    expect(recovery.draft.attachments).toHaveLength(1);
+    expect(recovery.draft.attachments[0]?.clientId).toContain(
+      "recovery-screenshot-",
+    );
+    expect(recovery.draft.attachments[0]?.clientId).not.toBe("old-screenshot");
+    expect(recovery.draft.completeness).toBe("complete");
+    expect(recovery.draft.missingElements).toEqual([]);
+    expect(recovery.draft.pendingImages).toEqual([]);
+    expect(recovery.draft).toMatchObject({
+      externalRef: original.draft.externalRef,
+      messages: original.draft.messages,
+      originConversationRef: original.draft.originConversationRef,
+      originTabId: original.draft.originTabId,
+      originUrl: original.draft.originUrl,
+      originWindowId: original.draft.originWindowId,
+      scope: original.draft.scope,
+      sensitivity: original.draft.sensitivity,
+      source: original.draft.source,
+      title: original.draft.title,
+    });
+    expect(result.state).toBe("complete");
+    expect(test.items.find((item) => item.id === original.id)).toMatchObject({
+      resolvedAt: fixedNow.toISOString(),
+      supersededByItemId: result.id,
+    });
+  });
+
+  it("returns the existing direct screenshot recovery instead of creating another", async () => {
+    const originalReceipt = receipt("partial");
+    const original = outboxItem({
+      captureId,
+      draft: {
+        ...draft(),
+        completeness: "partial",
+        missingElements: originalReceipt.missingElements,
+      },
+      receipt: originalReceipt,
+      receiptStoredAt: fixedNow.toISOString(),
+      state: "partial",
+    });
+    const screenshotAttachment = {
+      blobKey: "existing-screenshot-blob",
+      byteSize: 123,
+      clientId: "recovery-screenshot-existing",
+      fileName: "existing-screenshot.png",
+      mimeType: "image/png" as const,
+      sha256: "b".repeat(64),
+    };
+    const existing = outboxItem({
+      draft: {
+        ...draft(),
+        attachments: [screenshotAttachment],
+        completeness: "complete",
+        missingElements: [],
+      },
+      id: "existing-screenshot-recovery",
+      recoveryOfItemId: original.id,
+      state: "pending",
+    });
+    const test = setup([original, existing]);
+    const enqueue = vi.spyOn(test.dependencies.outbox, "enqueue");
+
+    const result = await test.controller.addScreenshotRecovery(original.id);
+
+    expect(result.id).toBe(existing.id);
+    expect(test.dependencies.captureVisibleTab).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(test.items).toHaveLength(2);
+  });
+
+  it("shares one screenshot recovery across concurrent calls", async () => {
     const originalReceipt = receipt("partial");
     const original = outboxItem({
       captureId,
@@ -530,15 +641,40 @@ describe("background controller", () => {
       state: "partial",
     });
     const test = setup([original]);
+    const enqueue = vi.spyOn(test.dependencies.outbox, "enqueue");
+    let releaseProcess!: () => void;
+    const processBlocked = new Promise<void>((resolve) => {
+      releaseProcess = resolve;
+    });
+    test.process.mockImplementation(async (id: string) => {
+      await processBlocked;
+      return test.dependencies.outbox.mutate(
+        id,
+        (item) => ({
+          ...item,
+          captureId,
+          receipt: receipt("complete"),
+          receiptStoredAt: fixedNow.toISOString(),
+          resolvedAt: fixedNow.toISOString(),
+          state: "complete",
+        }),
+        fixedNow,
+      );
+    });
 
-    await test.controller.addScreenshotRecovery(original.id);
+    const first = test.controller.addScreenshotRecovery(original.id);
+    const second = test.controller.addScreenshotRecovery(original.id);
 
-    const recovery = test.items[1]!;
-    expect(recovery.recoveryOfItemId).toBe(original.id);
-    expect(recovery.draft.source).toBe("chatgpt_web");
-    expect(recovery.draft.externalRef).toBe(original.draft.externalRef);
-    expect(recovery.draft.attachments).toHaveLength(1);
-    expect(original.receipt).toEqual(originalReceipt);
+    await vi.waitFor(() => expect(test.process).toHaveBeenCalled());
+    expect(test.dependencies.captureVisibleTab).toHaveBeenCalledTimes(1);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(test.process).toHaveBeenCalledTimes(1);
+
+    releaseProcess();
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    expect(secondResult).toBe(firstResult);
+    expect(test.items).toHaveLength(2);
   });
 
   it("persists extraction failure as a local terminal item without calling the API", async () => {
