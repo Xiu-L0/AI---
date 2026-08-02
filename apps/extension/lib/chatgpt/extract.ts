@@ -5,7 +5,8 @@ export const CHATGPT_SELECTORS = {
   messageContainers: "[data-message-author-role]",
   images: "img",
   excludedImages:
-    "[aria-hidden='true'], [hidden], [role='presentation'], [data-testid*='avatar'], [data-testid*='feedback'], [data-testid*='icon'], .avatar, [style*='display: none'], [style*='visibility: hidden']",
+    "[aria-hidden='true'], [hidden], [data-testid*='avatar'], [data-testid*='feedback'], [data-testid*='icon'], .avatar, [style*='display: none'], [style*='visibility: hidden']",
+  presentationImages: "[role='presentation']",
   excludedContent:
     "button, [aria-hidden='true'], [hidden], [data-testid*='copy'], [data-testid*='feedback'], [style*='display: none'], [style*='visibility: hidden']",
   generatingResponse:
@@ -320,6 +321,7 @@ export function extractChatGptConversation(
     ].filter(
       (image) =>
         !isHidden(image) &&
+        !image.matches(CHATGPT_SELECTORS.presentationImages) &&
         image.closest(CHATGPT_SELECTORS.excludedImages) === null &&
         image.closest(CHATGPT_SELECTORS.messageContainers) === container,
     );

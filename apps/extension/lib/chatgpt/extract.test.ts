@@ -81,15 +81,65 @@ describe("extractChatGptConversation", () => {
     ]);
   });
 
+  it("captures an attachment inside a presentation-role layout wrapper", () => {
+    const dom = new JSDOM(`
+      <main>
+        <article data-message-author-role="user" data-message-id="wrapped-upload">
+          <div role="presentation">
+            <button type="button">
+              <img
+                alt="wrapped-attachment.png"
+                src="https://chatgpt.com/backend-api/estuary/content?id=file_wrapped"
+                width="640"
+                height="480"
+              />
+            </button>
+          </div>
+          wrapped test message
+        </article>
+      </main>
+    `);
+
+    const extraction = extractChatGptConversation(
+      dom.window.document,
+      new URL("https://chatgpt.com/c/wrapped-upload"),
+    );
+
+    expect(extraction.images).toEqual([
+      {
+        alt: "wrapped-attachment.png",
+        height: 480,
+        messageExternalId: "wrapped-upload",
+        messageOrdinal: 0,
+        src: "https://chatgpt.com/backend-api/estuary/content?id=file_wrapped",
+        width: 640,
+      },
+    ]);
+  });
+
   it("excludes message images explicitly marked as interface decoration", () => {
     const dom = new JSDOM(`
       <main>
         <article data-message-author-role="assistant" data-message-id="with-icons">
           visible message
-          <img data-testid="conversation-turn-avatar" src="https://example.test/avatar.png" />
-          <img data-testid="message-feedback-icon" src="https://example.test/feedback.png" />
+          <span data-testid="conversation-turn-avatar">
+            <img src="https://example.test/avatar.png" />
+          </span>
+          <button data-testid="message-feedback-icon">
+            <img src="https://example.test/feedback.png" />
+          </button>
+          <span data-testid="toolbar-icon">
+            <img src="https://example.test/icon.png" />
+          </span>
           <img role="presentation" src="https://example.test/presentation.png" />
           <img aria-hidden="true" src="https://example.test/hidden.png" />
+          <img hidden src="https://example.test/hidden-attribute.png" />
+          <span aria-hidden="true">
+            <img src="https://example.test/hidden-ancestor.png" />
+          </span>
+          <span style="display: none">
+            <img src="https://example.test/css-hidden-ancestor.png" />
+          </span>
         </article>
       </main>
     `);
