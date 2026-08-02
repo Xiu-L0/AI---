@@ -5,7 +5,7 @@ export const CHATGPT_SELECTORS = {
   messageContainers: "[data-message-author-role]",
   images: "img",
   excludedImages:
-    "[aria-hidden='true'], [hidden], [role='presentation'], [data-testid*='avatar'], [data-testid*='feedback'], [data-testid*='icon'], .avatar, button img, [style*='display: none'], [style*='visibility: hidden']",
+    "[aria-hidden='true'], [hidden], [role='presentation'], [data-testid*='avatar'], [data-testid*='feedback'], [data-testid*='icon'], .avatar, [style*='display: none'], [style*='visibility: hidden']",
   excludedContent:
     "button, [aria-hidden='true'], [hidden], [data-testid*='copy'], [data-testid*='feedback'], [style*='display: none'], [style*='visibility: hidden']",
   generatingResponse:

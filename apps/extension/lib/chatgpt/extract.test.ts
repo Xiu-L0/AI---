@@ -47,6 +47,61 @@ const scopedExtraction: ChatGptExtraction = {
 };
 
 describe("extractChatGptConversation", () => {
+  it("captures a ChatGPT attachment thumbnail inside a button", () => {
+    const dom = new JSDOM(`
+      <main>
+        <article data-message-author-role="user" data-message-id="with-upload">
+          <button type="button">
+            <img
+              alt="recall-partial-test.png"
+              src="https://chatgpt.com/backend-api/estuary/content?id=file_test"
+              width="1254"
+              height="1254"
+            />
+          </button>
+          test message
+        </article>
+      </main>
+    `);
+
+    const extraction = extractChatGptConversation(
+      dom.window.document,
+      new URL("https://chatgpt.com/c/with-upload"),
+    );
+
+    expect(extraction.images).toEqual([
+      {
+        alt: "recall-partial-test.png",
+        height: 1254,
+        messageExternalId: "with-upload",
+        messageOrdinal: 0,
+        src: "https://chatgpt.com/backend-api/estuary/content?id=file_test",
+        width: 1254,
+      },
+    ]);
+  });
+
+  it("excludes message images explicitly marked as interface decoration", () => {
+    const dom = new JSDOM(`
+      <main>
+        <article data-message-author-role="assistant" data-message-id="with-icons">
+          visible message
+          <img data-testid="conversation-turn-avatar" src="https://example.test/avatar.png" />
+          <img data-testid="message-feedback-icon" src="https://example.test/feedback.png" />
+          <img role="presentation" src="https://example.test/presentation.png" />
+          <img aria-hidden="true" src="https://example.test/hidden.png" />
+        </article>
+      </main>
+    `);
+
+    const extraction = extractChatGptConversation(
+      dom.window.document,
+      new URL("https://chatgpt.com/c/with-icons"),
+    );
+
+    expect(extraction.images).toEqual([]);
+  });
+
   it("extracts ordered roles, stable ids, visible text, and image metadata", () => {
     const fixtureDom = fixtureDocument("complete-conversation.html");
     const result = extractChatGptConversation(
