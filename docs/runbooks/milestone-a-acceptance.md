@@ -251,10 +251,10 @@ rg -n "SERVICE_ROLE|SUPABASE_SERVICE_ROLE_KEY|secret-token" apps/extension/.outp
 - [x] 在原始 draft 已进入 Outbox 后断开 Recall API 网络。
 - [x] 弹窗显示“服务器尚未确认保存”，不显示成功。
 - [ ] 项目状态、稳定 idempotency key 和附件 Blob 在关闭弹窗后仍存在。
-- [ ] 浏览器工具栏角标显示未解决数量。
-- [ ] 重新打开浏览器后项目仍存在。
+- [x] 浏览器工具栏角标显示未解决数量。
+- [x] 重新打开浏览器后项目仍存在。
 - 结果：`NOT RUN`
-- 证据/备注：2026-08-02 选中文字恢复采集期间，本地 Recall Web 服务停止，等价于扩展无法访问 Recall API。扩展明确显示“服务器尚未确认保存”、`Failed to fetch` 和下次自动重试时间，未显示成功，并在待处理采集列表保留项目。关闭并重新打开弹窗后状态仍在；尚未执行整个 Chrome 关闭再打开，以及带附件 Blob 的持久化检查，因此 C-01 暂不整体标记 PASS。
+- 证据/备注：2026-08-02 选中文字恢复采集期间，本地 Recall Web 服务停止，等价于扩展无法访问 Recall API。扩展明确显示“服务器尚未确认保存”、`Failed to fetch` 和下次自动重试时间，未显示成功，并在待处理采集列表保留项目。2026-08-09 在 Edge 中停止 Recall Web 后出现待处理异常 2，工具栏角标同步显示 2；关闭所有 Edge 窗口并重新打开后，两项仍存在。服务恢复后项目取得 complete receipt、异常归零。此次仍无附件，尚未覆盖附件 Blob 跨浏览器重启，因此 C-01 暂不整体标记 PASS。
 
 ### C-02 自动重试
 
@@ -370,14 +370,14 @@ rg -n "SERVICE_ROLE|SUPABASE_SERVICE_ROLE_KEY|secret-token" apps/extension/.outp
 
 | 场景 | Chrome | Edge | 备注/证据 |
 | --- | --- | --- | --- |
-| 加载 `chrome-mv3` 无清单错误 | PASS | NOT RUN | 2026-08-02 Chrome 成功加载正式 `apps/extension/.output/chrome-mv3`，弹窗可正常打开 |
-| 生成一次性配对码并连接 | PASS | NOT RUN | Web 设置页显示 Chrome 扩展设备已配对，随后真实采集鉴权成功 |
-| 完整 ChatGPT 会话采集 | PASS | NOT RUN | 扩展完整 receipt 为 2 条消息、0 个附件；Web 历史与详情一致 |
+| 加载 `chrome-mv3` 无清单错误 | PASS | PASS | 2026-08-02 Chrome、2026-08-09 Edge 均成功加载正式 `apps/extension/.output/chrome-mv3`，弹窗可正常打开 |
+| 生成一次性配对码并连接 | PASS | PASS | Chrome 与 Edge 均通过 Web 设置页生成的一次性配对码成功连接；真实采集鉴权成功 |
+| 完整 ChatGPT 会话采集 | PASS | PASS | Chrome 与 Edge 的正式扩展均取得完整 receipt；Edge 第 21 次为 2 条消息、0 个附件、异常 0 |
 | Web 手动文本采集 | PASS | NOT RUN | Chrome 中已完成普通、敏感、严格敏感文本及单文件、单图、多图的服务器回执与详情核对 |
 | partial 缺失项显示 | PASS | NOT RUN | 真实含图会话在图片资源 HTTP 403 时显示具体缺失项；修复后补充截图生成版本 12，6 条消息、1 张 PNG、异常归零 |
-| 断网后 Outbox 保留 | PASS | NOT RUN | Recall Web 停止时显示 `Failed to fetch`、未确认保存和重试时间；关闭并重开弹窗后项目仍在，服务恢复后自动完成 |
+| 断网后 Outbox 保留 | PASS | PASS | Chrome 与 Edge 在 Recall Web 停止时均未显示成功；Edge 待处理异常 2 在关闭全部窗口并重开后仍存在，服务恢复后完整保存并归零 |
 | 手动重试恢复 | NOT RUN | NOT RUN |  |
-| 关闭并重开浏览器后 Outbox 仍在 | NOT RUN | NOT RUN |  |
+| 关闭并重开浏览器后 Outbox 仍在 | NOT RUN | PASS | Edge 关闭全部窗口并重开后，工具栏角标与两个待处理项目均保留；此次无附件，附件 Blob 持久性仍需另测 |
 | 撤销凭据后重新配对恢复 | NOT RUN | NOT RUN |  |
 
 ## 11. 后续用户协助的 30 次真实采集验收
@@ -424,9 +424,9 @@ rg -n "SERVICE_ROLE|SUPABASE_SERVICE_ROLE_KEY|secret-token" apps/extension/.outp
 | 17 | 2026-08-02 | Chrome | ChatGPT 含一张合成图片的完整会话 | 是 | 错误报告完整（实际缺图） | 否（虽在 durable receipt 后显示，但 receipt 错误声称完整） | 尚无 | 文字已保存，图片遗漏 | 正式扩展显示“完整采集成功”、6 条消息、0 个附件；Web 同一 SourceItem 新增版本 3，完整显示 6 条消息但没有附件区块，异常计数仍为 0。该图片已由 ChatGPT 正确识别并回复，因此不是未发送图片；这是符合支持条件的真实失败样本和不可降低底线违规。 |
 | 18 | 2026-08-02 | Chrome | ChatGPT 含图完整会话 / 第一次修复后复测 | 是 | 错误报告完整（实际仍缺图） | 否（receipt 继续错误声称完整） | 尚无 | 未创建新版本，图片仍遗漏 | 重新加载正式扩展并刷新 ChatGPT 页面后再次保存；扩展仍显示完整采集、6 条消息、0 个附件。Web 强制刷新后仍为 3 个版本且无附件区块。真实 DOM 复核发现图片外层存在布局容器 `role="presentation"`，旧筛选通过 `closest()` 把有效图片误判为装饰；需第二次最小修复。 |
 | 19 | 2026-08-02 | Chrome | ChatGPT 含图完整会话 / 第二次修复后复测 | 是 | 自动部分 | 是（durable partial receipt 后显示“部分内容未采集”） | 补充当前可见页面截图 | 人工兜底后完整保存 | 正式扩展先显示待处理异常 1，并列出“第 5 条消息中的图片无法保存：HTTP 403”。修复后只点击一次补充截图；扩展在 durable complete receipt 后显示 6 条消息、1 个附件、异常 0。Web 同一 SourceItem 新增版本 12，完整采集、仅一张 image/png、无缺失项；异常页显示目前没有未恢复异常。版本 5–11 作为修复前重复点击缺陷证据保留，不另计正式尝试。 |
-| 20 |  |  |  |  |  |  |  |  |  |
-| 21 |  |  |  |  |  |  |  |  |  |
-| 22 |  |  |  |  |  |  |  |  |  |
+| 20 | 2026-08-08 | Chrome | ChatGPT 新建文本会话 / Recall Web 服务停止 | 是 | 初始失败 | 否（明确保留在待处理列表，未显示成功） | Web 服务恢复后点击立即重试 | 完整保存 | 首次提交时数据库正常但 Web 服务不可用，扩展显示待处理异常 1、服务器尚未确认保存；服务恢复后复用原待处理项目重试，取得 complete receipt，显示 2 条消息、0 个附件、异常 0；用户截图确认。 |
+| 21 | 2026-08-09 | Edge | ChatGPT 新建文本会话 / 完整会话 | 是 | 自动完整 | 是（扩展取得 complete receipt 后显示成功） | 无 | 完整保存 | Edge 正式扩展正确识别 ChatGPT 网页版；显示完整采集成功、2 条消息、0 个附件、待处理异常 0；用户截图确认。 |
+| 22 | 2026-08-09 | Edge | ChatGPT 文本会话 / Recall Web 停止并重启 Edge | 是 | 初始失败 | 否（明确显示待处理异常，未显示成功） | 关闭全部 Edge 窗口并重开；恢复 Web 后重试 | 完整保存 | Web 停止后工具栏与弹窗显示待处理异常 2；重开 Edge 后两项仍在。服务恢复后 complete receipt 显示 2 条消息、0 个附件、异常 0。只读数据库核对为 1 个 SourceItem、1 个 complete 版本、2 个唯一消息 ID；重复待处理没有产生重复版本或消息。本行只计一次正式尝试。 |
 | 23 |  |  |  |  |  |  |  |  |  |
 | 24 |  |  |  |  |  |  |  |  |  |
 | 25 |  |  |  |  |  |  |  |  |  |
@@ -453,12 +453,12 @@ rg -n "SERVICE_ROLE|SUPABASE_SERVICE_ROLE_KEY|secret-token" apps/extension/.outp
 
 | 指标 | 数量 |
 | --- | ---: |
-| 符合支持条件的真实尝试 `N_supported` | 19 |
-| 首次自动完整 `N_auto_complete` | 15 |
+| 符合支持条件的真实尝试 `N_supported` | 22 |
+| 首次自动完整 `N_auto_complete` | 16 |
 | 首次自动部分 `N_auto_partial` | 1 |
-| 初始失败 `N_initial_failed` | 1 |
+| 初始失败 `N_initial_failed` | 3 |
 | 错误报告完整 `N_false_complete` | 2 |
-| 重试恢复 `N_retry_recovered` | 1 |
+| 重试恢复 `N_retry_recovered` | 3 |
 | 人工兜底完成 `N_manual_fallback` | 1 |
 | 验收结束仍未恢复 `N_unresolved_failed` | 0 |
 | 成功文案早于 durable receipt 的次数 | 0 |
@@ -467,14 +467,14 @@ rg -n "SERVICE_ROLE|SUPABASE_SERVICE_ROLE_KEY|secret-token" apps/extension/.outp
 
 ```text
 N_auto_complete / N_supported × 100%
-15 / 19 × 100% = 78.95%（阶段值，样本不足且尚未达到正式目标）
+16 / 22 × 100% = 72.73%（阶段值，样本不足且尚未达到正式目标）
 ```
 
 兜底完成率单独报告：
 
 ```text
 N_manual_fallback / N_supported × 100%
-1 / 19 × 100% = 5.26%
+1 / 22 × 100% = 4.55%
 ```
 
 正式判定要求：
@@ -500,6 +500,7 @@ N_manual_fallback / N_supported × 100%
 | 18 | 产品缺陷 / ChatGPT 图片仍被布局容器误排除 | 第一次修复并重新加载正式扩展后，仍显示完整采集、6 条消息、0 个附件；Web 仍为 3 个版本 | receipt 复用了错误的完整结果；没有创建含附件的新版本 | 图片的较高层祖先 `div[role="presentation"]` 被 `image.closest(excludedImages)` 命中，真实附件在进入完整性检查前仍被过滤 | 新增真实祖先结构回归测试；仅把展示用途限制到图片节点本身，同时保留隐藏祖先及明确头像/反馈/图标排除 | 是；第二个验收阻断，修复并真实复测前保持 FAIL |
 | 19 | 页面资源权限 / 诚实 partial | 第二次修复后识别到图片，但下载 ChatGPT Estuary 资源返回 HTTP 403；扩展显示部分采集和待处理异常 1 | 是；6 条文字消息已 durable 保存为版本 4 | ChatGPT 图片资源需要当前页面会话权限，扩展后台直接请求未获授权；现有设计要求以 partial 和截图兜底恢复 | 同一次尝试通过扩展“补充截图”保存当前可见页面；版本 12 完整、1 张 PNG、异常归零 | 当前诚实 partial 符合设计；截图兜底已验证，直接附件下载可作为后续兼容性改进 |
 | 19 恢复过程 | 产品缺陷 / 截图恢复状态与重复附件 | 修复前补充截图已上传，但弹窗仍显示 partial；用户因无成功反馈重复点击，Web 形成版本 5–11，后续版本继承并累积截图 | 是；每次均有 partial receipt，但缺失项没有被截图兜底清除 | 截图恢复草稿继承原 `completeness`、`missingElements` 和历史附件；本地仅有按钮级防重，没有持久及并发单飞保护 | 采用方案 A：新恢复草稿只含本次 PNG、状态 complete、缺失项清空；Outbox 子项检查与控制器单飞共同防重；正式构建复测形成版本 12 | 是；修复提交 `18295d4`，151 项扩展测试、类型检查、正式构建、Manifest 与 secret 检查通过；真实 Chrome 复测通过 |
+| 22 | 服务 / 浏览器重启恢复 | Recall Web 停止时 Edge 显示待处理异常 2；关闭全部 Edge 窗口并重开后项目仍保留，没有显示成功 | 否 | 验收主动暂停本地 Web 服务；数据库仍在线 | 重开 Edge 后恢复 Web，原项目重试取得 complete receipt；数据库只有 1 个 SourceItem、1 个 complete 版本和 2 个唯一消息 ID | 否；浏览器重启持久性与服务恢复去重符合设计，附件 Blob 仍需独立验证 |
 |  | 页面结构变化 / 权限 / 网络 / 服务 / 输入限制 / 产品缺口 / 其他 |  |  |  |  |  |
 
 根因必须区分：
@@ -541,8 +542,8 @@ N_manual_fallback / N_supported × 100%
 | 字段 | 记录 |
 | --- | --- |
 | 最终结论 | CONDITIONAL |
-| 日期 | 2026-08-02 |
-| 用户确认 | Chrome 真实验收进行中；第 17–19 次及第 19 次截图兜底结果由用户截图确认 |
-| Codex 验证摘要 | 含图会话的静默遗漏、布局过滤和截图恢复状态缺陷均已保留失败证据并修复。最新正式扩展复测显示完整成功、6 条消息、1 个附件、异常 0；Web 同一 SourceItem 版本 12 完整且仅一张 PNG，异常页清零。扩展 151 项测试、类型检查、正式构建、Manifest 与 secret 检查通过 |
-| 未解决问题 | 当前 19/30；按现有 `N_auto_complete / N_supported` 口径为 15/19，达到正式 90% 至少需要继续增加 21 次全部自动完整的支持样本（总计 40 次）；Edge 尚未执行；补截图失败的真实浏览器路径、带附件断网重试、浏览器重开持久性和凭据撤销/重新配对尚待验证；为保护本地数据，清空式数据库 reset 未执行 |
+| 日期 | 2026-08-09 |
+| 用户确认 | Chrome 与 Edge 真实验收进行中；第 17–22 次、第 19 次截图兜底、第 20 次服务恢复和第 22 次 Edge 重启恢复结果由用户截图确认 |
+| Codex 验证摘要 | 含图会话的静默遗漏、布局过滤和截图恢复状态缺陷均已保留失败证据并修复。第 21 次 Edge 自动完整保存；第 22 次在 Web 停止后保留两个待处理项目，关闭并重开 Edge 后仍存在，服务恢复后完整保存、异常归零；数据库核对没有重复 SourceItem、版本或消息。此前扩展 151 项测试、类型检查、正式构建、Manifest 与 secret 检查通过 |
+| 未解决问题 | 当前 22/30；按现有 `N_auto_complete / N_supported` 口径为 16/22，达到正式 90% 至少需要继续增加 38 次全部自动完整的支持样本（总计 60 次）；Edge 已完成加载、配对、完整 ChatGPT 会话和无附件 Outbox 跨浏览器重启；补截图失败的真实浏览器路径、带附件断网/重启、附件 retry token 和凭据撤销/重新配对尚待验证；为保护本地数据，清空式数据库 reset 未执行 |
 | Milestone B 是否允许开始规划 | 否；只有 Review Gate 完成后才能改为是 |
