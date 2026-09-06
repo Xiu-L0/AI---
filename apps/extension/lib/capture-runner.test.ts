@@ -940,6 +940,123 @@ describe("capture runner", () => {
     expect(upload).not.toHaveBeenCalled();
   });
 
+  it("recovers after upload succeeds but finalize is interrupted", async () => {
+    const blob = syntheticPngBlob();
+    const hash = await bytesHash(syntheticPngBytes());
+    const frozen = item({
+      draft: {
+        ...item().draft,
+        attachments: [
+          {
+            blobKey: "blob-1",
+            byteSize: blob.size,
+            clientId: "image-1",
+            fileName: "image-1.png",
+            mimeType: "image/png",
+            sha256: hash,
+          },
+        ],
+      },
+    });
+    const outbox = fakeOutbox(frozen);
+    const storedObjects = new Map<string, { etag: string; token: string }>();
+    const finalizeReceipt = { ...receipt(), savedAttachmentCount: 1 };
+    const start = vi
+      .fn<CaptureApiClient["start"]>()
+      .mockResolvedValueOnce({
+        captureId,
+        uploadTargets: [
+          {
+            clientId: "image-1",
+            storagePath: "owner/capture/image-1.png",
+            token: "signed-token-1",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        captureId,
+        uploadTargets: [
+          {
+            clientId: "image-1",
+            storagePath: "owner/capture/image-1.png",
+            token: "signed-token-2",
+          },
+        ],
+      });
+    const finalize = vi
+      .fn<CaptureApiClient["finalize"]>()
+      .mockRejectedValueOnce(new TypeError("connection closed"))
+      .mockResolvedValueOnce(finalizeReceipt);
+    const status = vi.fn<CaptureApiClient["status"]>(async () => {
+      throw new ExtensionApiError({
+        code: "capture_not_finalized",
+        status: 409,
+      });
+    });
+    const api: CaptureApiClient = {
+      finalize,
+      reportFailure: vi.fn(async () => failureReport()),
+      start,
+      status,
+    };
+    const upload = vi.fn(async (target) => {
+      storedObjects.set(target.storagePath, {
+        etag: "etag-1",
+        token: target.token,
+      });
+      return {
+        clientId: target.clientId,
+        etag: "etag-1",
+        storagePath: target.storagePath,
+      };
+    });
+    const sharedDependencies = {
+      attachmentStore: {
+        getAttachment: vi.fn(async () => blob),
+        putAttachment: vi.fn(async () => undefined),
+      },
+      getApiClient: async () => api,
+      outbox: outbox.port,
+      upload,
+    };
+
+    const interrupted = await createCaptureRunner(
+      sharedDependencies,
+    ).processOutboxItem("outbox-1", now);
+
+    expect(interrupted.state).toBe("retry_wait");
+    expect(interrupted.captureId).toBe(captureId);
+    expect(interrupted.uploadedAttachments).toEqual([
+      {
+        clientId: "image-1",
+        etag: "etag-1",
+        storagePath: "owner/capture/image-1.png",
+      },
+    ]);
+    expect(JSON.stringify(interrupted)).not.toContain("signed-token");
+
+    const result = await createCaptureRunner(
+      sharedDependencies,
+    ).processOutboxItem("outbox-1", now);
+
+    expect(result.state).toBe("complete");
+    expect(result.captureId).toBe(captureId);
+    expect(result.receipt).toEqual(finalizeReceipt);
+    expect(storedObjects.size).toBe(1);
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(start).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ idempotencyKey: "idempotency-key-1" }),
+    );
+    expect(start).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ idempotencyKey: "idempotency-key-1" }),
+    );
+    expect(finalize).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(result)).not.toContain("signed-token");
+    expect(JSON.stringify(outbox.current)).not.toContain("signed-token");
+  });
+
   it("treats malformed successful API data as terminal", async () => {
     const setup = dependencies(fakeOutbox(), {
       start: vi.fn(async () => {
