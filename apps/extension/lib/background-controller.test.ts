@@ -677,6 +677,101 @@ describe("background controller", () => {
     expect(test.items).toHaveLength(2);
   });
 
+  it("keeps the original partial recoverable when screenshot capture fails", async () => {
+    const originalReceipt = receipt("partial");
+    const original = outboxItem({
+      captureId,
+      draft: {
+        ...draft(),
+        completeness: "partial",
+        missingElements: originalReceipt.missingElements,
+      },
+      receipt: originalReceipt,
+      receiptStoredAt: fixedNow.toISOString(),
+      state: "partial",
+    });
+    const test = setup([original]);
+    const enqueue = vi.spyOn(test.dependencies.outbox, "enqueue");
+    test.dependencies.captureVisibleTab = vi.fn(async () => {
+      throw new Error("The active tab cannot be captured");
+    });
+
+    await expect(
+      test.controller.addScreenshotRecovery(original.id),
+    ).rejects.toThrow("The active tab cannot be captured");
+
+    const snapshot = test.items.find((item) => item.id === original.id);
+    expect(snapshot).toMatchObject({
+      receipt: originalReceipt,
+      resolvedAt: null,
+      state: "partial",
+      supersededByItemId: null,
+    });
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(test.process).not.toHaveBeenCalled();
+    expect(test.items).toHaveLength(1);
+
+    test.dependencies.captureVisibleTab = vi.fn(
+      async () =>
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    );
+    const first = test.controller.addScreenshotRecovery(original.id);
+    const second = test.controller.addScreenshotRecovery(original.id);
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    expect(secondResult).toBe(firstResult);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(
+      test.items.filter((item) => item.recoveryOfItemId === original.id),
+    ).toHaveLength(1);
+    expect(test.items.find((item) => item.id === original.id)?.state).toBe(
+      "partial",
+    );
+  });
+
+  it("keeps the original partial recoverable when local screenshot storage fails", async () => {
+    const originalReceipt = receipt("partial");
+    const original = outboxItem({
+      captureId,
+      draft: {
+        ...draft(),
+        completeness: "partial",
+        missingElements: originalReceipt.missingElements,
+      },
+      receipt: originalReceipt,
+      receiptStoredAt: fixedNow.toISOString(),
+      state: "partial",
+    });
+    const test = setup([original]);
+    const enqueue = vi.spyOn(test.dependencies.outbox, "enqueue");
+    test.dependencies.attachmentStore.putAttachment = vi.fn(async () => {
+      throw new Error("IndexedDB write failed");
+    });
+
+    await expect(
+      test.controller.addScreenshotRecovery(original.id),
+    ).rejects.toThrow("IndexedDB write failed");
+
+    expect(test.dependencies.captureVisibleTab).toHaveBeenCalledTimes(1);
+    expect(test.items.find((item) => item.id === original.id)).toMatchObject({
+      receipt: originalReceipt,
+      resolvedAt: null,
+      state: "partial",
+      supersededByItemId: null,
+    });
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(test.items).toHaveLength(1);
+
+    test.dependencies.attachmentStore.putAttachment = vi.fn(async () => undefined);
+    const recovered = await test.controller.addScreenshotRecovery(original.id);
+
+    expect(recovered.recoveryOfItemId).toBe(original.id);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(
+      test.items.filter((item) => item.recoveryOfItemId === original.id),
+    ).toHaveLength(1);
+  });
+
   it("persists extraction failure as a local terminal item without calling the API", async () => {
     const test = setup();
     test.dependencies.extractChatGpt = vi.fn(async () => ({

@@ -149,6 +149,8 @@ describe("extension popup", () => {
       "The active tab cannot be captured",
     );
     expect(screen.getByText("部分内容未采集")).toBeVisible();
+    expect(screen.getByText("1 张图片无法读取")).toBeVisible();
+    expect(screen.getByRole("button", { name: "补充截图" })).toBeVisible();
   });
 
   it("retries a retry-wait item immediately and refreshes the exception count", async () => {
