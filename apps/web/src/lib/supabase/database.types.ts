@@ -133,6 +133,63 @@ export type Database = {
           },
         ]
       }
+      citations: {
+        Row: {
+          claim_path: string
+          created_at: string
+          id: string
+          knowledge_item_id: string
+          origin_type: Database["public"]["Enums"]["citation_origin"]
+          owner_user_id: string
+          quote_excerpt: string
+          review_status: Database["public"]["Enums"]["citation_review_status"]
+          source_block_id: string
+          space_id: string
+          updated_at: string
+        }
+        Insert: {
+          claim_path: string
+          created_at?: string
+          id?: string
+          knowledge_item_id: string
+          origin_type: Database["public"]["Enums"]["citation_origin"]
+          owner_user_id: string
+          quote_excerpt: string
+          review_status?: Database["public"]["Enums"]["citation_review_status"]
+          source_block_id: string
+          space_id: string
+          updated_at?: string
+        }
+        Update: {
+          claim_path?: string
+          created_at?: string
+          id?: string
+          knowledge_item_id?: string
+          origin_type?: Database["public"]["Enums"]["citation_origin"]
+          owner_user_id?: string
+          quote_excerpt?: string
+          review_status?: Database["public"]["Enums"]["citation_review_status"]
+          source_block_id?: string
+          space_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "citations_block_owner_space_fk"
+            columns: ["source_block_id", "owner_user_id", "space_id"]
+            isOneToOne: false
+            referencedRelation: "source_blocks"
+            referencedColumns: ["id", "owner_user_id", "space_id"]
+          },
+          {
+            foreignKeyName: "citations_knowledge_owner_space_fk"
+            columns: ["knowledge_item_id", "owner_user_id", "space_id"]
+            isOneToOne: false
+            referencedRelation: "knowledge_items"
+            referencedColumns: ["id", "owner_user_id", "space_id"]
+          },
+        ]
+      }
       extension_pairing_codes: {
         Row: {
           code_hash: string
@@ -193,6 +250,130 @@ export type Database = {
         }
         Relationships: []
       }
+      knowledge_items: {
+        Row: {
+          conditions: string[]
+          confidence: number
+          created_at: string
+          created_by_user_id: string
+          current_version: number
+          evidence_mode: Database["public"]["Enums"]["knowledge_evidence_mode"]
+          freshness_status: string
+          human_locked_fields: string[]
+          id: string
+          knowledge_type: Database["public"]["Enums"]["knowledge_type"]
+          l0_summary: string
+          l1_content: string
+          l2_content: string
+          limitations: string[]
+          owner_user_id: string
+          review_after: string | null
+          space_id: string
+          status: Database["public"]["Enums"]["knowledge_status"]
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          conditions?: string[]
+          confidence: number
+          created_at?: string
+          created_by_user_id: string
+          current_version?: number
+          evidence_mode?: Database["public"]["Enums"]["knowledge_evidence_mode"]
+          freshness_status?: string
+          human_locked_fields?: string[]
+          id?: string
+          knowledge_type: Database["public"]["Enums"]["knowledge_type"]
+          l0_summary: string
+          l1_content: string
+          l2_content?: string
+          limitations?: string[]
+          owner_user_id: string
+          review_after?: string | null
+          space_id: string
+          status?: Database["public"]["Enums"]["knowledge_status"]
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          conditions?: string[]
+          confidence?: number
+          created_at?: string
+          created_by_user_id?: string
+          current_version?: number
+          evidence_mode?: Database["public"]["Enums"]["knowledge_evidence_mode"]
+          freshness_status?: string
+          human_locked_fields?: string[]
+          id?: string
+          knowledge_type?: Database["public"]["Enums"]["knowledge_type"]
+          l0_summary?: string
+          l1_content?: string
+          l2_content?: string
+          limitations?: string[]
+          owner_user_id?: string
+          review_after?: string | null
+          space_id?: string
+          status?: Database["public"]["Enums"]["knowledge_status"]
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "knowledge_items_space_owner_fk"
+            columns: ["space_id", "owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "spaces"
+            referencedColumns: ["id", "owner_user_id"]
+          },
+        ]
+      }
+      knowledge_versions: {
+        Row: {
+          change_origin: Database["public"]["Enums"]["knowledge_change_origin"]
+          changed_by_user_id: string | null
+          created_at: string
+          id: string
+          knowledge_item_id: string
+          owner_user_id: string
+          processor_run_id: string | null
+          snapshot_json: Json
+          space_id: string
+          version: number
+        }
+        Insert: {
+          change_origin: Database["public"]["Enums"]["knowledge_change_origin"]
+          changed_by_user_id?: string | null
+          created_at?: string
+          id?: string
+          knowledge_item_id: string
+          owner_user_id: string
+          processor_run_id?: string | null
+          snapshot_json: Json
+          space_id: string
+          version: number
+        }
+        Update: {
+          change_origin?: Database["public"]["Enums"]["knowledge_change_origin"]
+          changed_by_user_id?: string | null
+          created_at?: string
+          id?: string
+          knowledge_item_id?: string
+          owner_user_id?: string
+          processor_run_id?: string | null
+          snapshot_json?: Json
+          space_id?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "knowledge_versions_item_owner_space_fk"
+            columns: ["knowledge_item_id", "owner_user_id", "space_id"]
+            isOneToOne: false
+            referencedRelation: "knowledge_items"
+            referencedColumns: ["id", "owner_user_id", "space_id"]
+          },
+        ]
+      }
       processing_jobs: {
         Row: {
           attempt_count: number
@@ -203,6 +384,7 @@ export type Database = {
           next_attempt_at: string
           owner_user_id: string
           source_version_id: string
+          space_id: string
           status: Database["public"]["Enums"]["processing_state"]
           updated_at: string
         }
@@ -215,6 +397,7 @@ export type Database = {
           next_attempt_at?: string
           owner_user_id: string
           source_version_id: string
+          space_id: string
           status?: Database["public"]["Enums"]["processing_state"]
           updated_at?: string
         }
@@ -227,15 +410,145 @@ export type Database = {
           next_attempt_at?: string
           owner_user_id?: string
           source_version_id?: string
+          space_id?: string
           status?: Database["public"]["Enums"]["processing_state"]
           updated_at?: string
         }
         Relationships: [
           {
+            foreignKeyName: "processing_jobs_space_owner_fk"
+            columns: ["space_id", "owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "spaces"
+            referencedColumns: ["id", "owner_user_id"]
+          },
+          {
             foreignKeyName: "processing_jobs_version_owner_fk"
             columns: ["source_version_id", "owner_user_id"]
             isOneToOne: false
             referencedRelation: "source_versions"
+            referencedColumns: ["id", "owner_user_id"]
+          },
+        ]
+      }
+      review_tasks: {
+        Row: {
+          created_at: string
+          id: string
+          knowledge_item_id: string | null
+          owner_user_id: string
+          priority: number
+          reason: string
+          resolved_at: string | null
+          resolved_by_user_id: string | null
+          space_id: string
+          status: Database["public"]["Enums"]["review_task_status"]
+          task_type: Database["public"]["Enums"]["review_task_type"]
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          knowledge_item_id?: string | null
+          owner_user_id: string
+          priority: number
+          reason: string
+          resolved_at?: string | null
+          resolved_by_user_id?: string | null
+          space_id: string
+          status?: Database["public"]["Enums"]["review_task_status"]
+          task_type: Database["public"]["Enums"]["review_task_type"]
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          knowledge_item_id?: string | null
+          owner_user_id?: string
+          priority?: number
+          reason?: string
+          resolved_at?: string | null
+          resolved_by_user_id?: string | null
+          space_id?: string
+          status?: Database["public"]["Enums"]["review_task_status"]
+          task_type?: Database["public"]["Enums"]["review_task_type"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "review_tasks_knowledge_owner_space_fk"
+            columns: ["knowledge_item_id", "owner_user_id", "space_id"]
+            isOneToOne: false
+            referencedRelation: "knowledge_items"
+            referencedColumns: ["id", "owner_user_id", "space_id"]
+          },
+          {
+            foreignKeyName: "review_tasks_space_owner_fk"
+            columns: ["space_id", "owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "spaces"
+            referencedColumns: ["id", "owner_user_id"]
+          },
+        ]
+      }
+      source_asset_links: {
+        Row: {
+          created_at: string
+          id: string
+          owner_user_id: string
+          relation_type: Database["public"]["Enums"]["source_asset_relation"]
+          source_attachment_id: string
+          source_block_id: string | null
+          source_message_id: string | null
+          space_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          owner_user_id: string
+          relation_type: Database["public"]["Enums"]["source_asset_relation"]
+          source_attachment_id: string
+          source_block_id?: string | null
+          source_message_id?: string | null
+          space_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          owner_user_id?: string
+          relation_type?: Database["public"]["Enums"]["source_asset_relation"]
+          source_attachment_id?: string
+          source_block_id?: string | null
+          source_message_id?: string | null
+          space_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "source_asset_links_attachment_owner_fk"
+            columns: ["source_attachment_id", "owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "source_attachments"
+            referencedColumns: ["id", "owner_user_id"]
+          },
+          {
+            foreignKeyName: "source_asset_links_block_owner_space_fk"
+            columns: ["source_block_id", "owner_user_id", "space_id"]
+            isOneToOne: false
+            referencedRelation: "source_blocks"
+            referencedColumns: ["id", "owner_user_id", "space_id"]
+          },
+          {
+            foreignKeyName: "source_asset_links_message_owner_fk"
+            columns: ["source_message_id", "owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "source_messages"
+            referencedColumns: ["id", "owner_user_id"]
+          },
+          {
+            foreignKeyName: "source_asset_links_space_owner_fk"
+            columns: ["space_id", "owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "spaces"
             referencedColumns: ["id", "owner_user_id"]
           },
         ]
@@ -287,6 +600,102 @@ export type Database = {
           },
         ]
       }
+      source_blocks: {
+        Row: {
+          block_type: Database["public"]["Enums"]["source_block_type"]
+          content_hash: string
+          created_at: string
+          id: string
+          language: string | null
+          locator_json: Json
+          locator_key: string
+          metadata_json: Json | null
+          ordinal: number
+          owner_user_id: string
+          source_item_id: string
+          source_message_id: string | null
+          source_version_id: string
+          space_id: string
+          text_content: string
+          updated_at: string
+        }
+        Insert: {
+          block_type: Database["public"]["Enums"]["source_block_type"]
+          content_hash: string
+          created_at?: string
+          id?: string
+          language?: string | null
+          locator_json: Json
+          locator_key: string
+          metadata_json?: Json | null
+          ordinal: number
+          owner_user_id: string
+          source_item_id: string
+          source_message_id?: string | null
+          source_version_id: string
+          space_id: string
+          text_content: string
+          updated_at?: string
+        }
+        Update: {
+          block_type?: Database["public"]["Enums"]["source_block_type"]
+          content_hash?: string
+          created_at?: string
+          id?: string
+          language?: string | null
+          locator_json?: Json
+          locator_key?: string
+          metadata_json?: Json | null
+          ordinal?: number
+          owner_user_id?: string
+          source_item_id?: string
+          source_message_id?: string | null
+          source_version_id?: string
+          space_id?: string
+          text_content?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "source_blocks_item_owner_space_fk"
+            columns: ["source_item_id", "owner_user_id", "space_id"]
+            isOneToOne: false
+            referencedRelation: "source_items"
+            referencedColumns: ["id", "owner_user_id", "space_id"]
+          },
+          {
+            foreignKeyName: "source_blocks_message_version_item_owner_fk"
+            columns: [
+              "source_message_id",
+              "source_version_id",
+              "source_item_id",
+              "owner_user_id",
+            ]
+            isOneToOne: false
+            referencedRelation: "source_messages"
+            referencedColumns: [
+              "id",
+              "source_version_id",
+              "source_item_id",
+              "owner_user_id",
+            ]
+          },
+          {
+            foreignKeyName: "source_blocks_space_owner_fk"
+            columns: ["space_id", "owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "spaces"
+            referencedColumns: ["id", "owner_user_id"]
+          },
+          {
+            foreignKeyName: "source_blocks_version_item_owner_fk"
+            columns: ["source_version_id", "source_item_id", "owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "source_versions"
+            referencedColumns: ["id", "source_item_id", "owner_user_id"]
+          },
+        ]
+      }
       source_items: {
         Row: {
           archived_at: string | null
@@ -298,6 +707,7 @@ export type Database = {
           owner_user_id: string
           sensitivity: Database["public"]["Enums"]["sensitivity_level"]
           source: Database["public"]["Enums"]["capture_source"]
+          space_id: string
           title: string
           updated_at: string
         }
@@ -311,6 +721,7 @@ export type Database = {
           owner_user_id: string
           sensitivity: Database["public"]["Enums"]["sensitivity_level"]
           source: Database["public"]["Enums"]["capture_source"]
+          space_id: string
           title: string
           updated_at?: string
         }
@@ -324,10 +735,19 @@ export type Database = {
           owner_user_id?: string
           sensitivity?: Database["public"]["Enums"]["sensitivity_level"]
           source?: Database["public"]["Enums"]["capture_source"]
+          space_id?: string
           title?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "source_items_space_owner_fk"
+            columns: ["space_id", "owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "spaces"
+            referencedColumns: ["id", "owner_user_id"]
+          },
+        ]
       }
       source_messages: {
         Row: {
@@ -424,14 +844,81 @@ export type Database = {
           },
         ]
       }
+      space_members: {
+        Row: {
+          created_at: string
+          role: Database["public"]["Enums"]["space_member_role"]
+          space_id: string
+          space_owner_user_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          role: Database["public"]["Enums"]["space_member_role"]
+          space_id: string
+          space_owner_user_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          role?: Database["public"]["Enums"]["space_member_role"]
+          space_id?: string
+          space_owner_user_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "space_members_space_owner_fk"
+            columns: ["space_id", "space_owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "spaces"
+            referencedColumns: ["id", "owner_user_id"]
+          },
+        ]
+      }
+      spaces: {
+        Row: {
+          created_at: string
+          created_by_user_id: string
+          id: string
+          name: string
+          owner_user_id: string
+          type: Database["public"]["Enums"]["space_type"]
+        }
+        Insert: {
+          created_at?: string
+          created_by_user_id: string
+          id?: string
+          name: string
+          owner_user_id: string
+          type?: Database["public"]["Enums"]["space_type"]
+        }
+        Update: {
+          created_at?: string
+          created_by_user_id?: string
+          id?: string
+          name?: string
+          owner_user_id?: string
+          type?: Database["public"]["Enums"]["space_type"]
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      assert_ai_knowledge_update: {
+        Args: { p_changed_fields: string[]; p_locked_fields: string[] }
+        Returns: undefined
+      }
       assert_source_version_capture_limits: {
         Args: { checked_source_version_id: string }
         Returns: undefined
+      }
+      ensure_private_space: {
+        Args: { p_owner_user_id: string }
+        Returns: string
       }
       exchange_extension_pairing_code: {
         Args: {
@@ -441,10 +928,6 @@ export type Database = {
           p_token_hash: string
         }
         Returns: Json
-      }
-      ensure_private_space: {
-        Args: { p_owner_user_id: string }
-        Returns: string
       }
       finalize_capture: {
         Args: {
@@ -464,8 +947,16 @@ export type Database = {
         Args: { manifest: Json }
         Returns: boolean
       }
+      is_valid_human_locked_fields: {
+        Args: { fields: string[] }
+        Returns: boolean
+      }
       is_valid_missing_elements: {
         Args: { missing_elements: string[] }
+        Returns: boolean
+      }
+      is_valid_short_text_array: {
+        Args: { p_values: string[] }
         Returns: boolean
       }
       report_capture_failure: {
@@ -491,13 +982,60 @@ export type Database = {
         | "manual_text"
         | "manual_file"
         | "manual_screenshot"
+      citation_origin: "ai" | "user"
+      citation_review_status: "pending" | "approved" | "rejected"
+      knowledge_change_origin: "ai" | "user" | "system"
+      knowledge_evidence_mode: "cited" | "personal_inference"
+      knowledge_status:
+        | "ai_draft"
+        | "pending_review"
+        | "confirmed"
+        | "rejected"
+        | "archived"
+        | "needs_review"
+      knowledge_type:
+        | "concept"
+        | "principle"
+        | "method"
+        | "scenario"
+        | "case"
+        | "fact"
+        | "opinion"
+        | "question"
+        | "conclusion"
       processing_state:
         | "queued"
         | "processing"
         | "complete"
         | "failed"
         | "paused"
+      review_task_status: "open" | "completed" | "dismissed"
+      review_task_type:
+        | "knowledge_draft"
+        | "low_confidence"
+        | "sensitive_content"
+        | "conflict"
+        | "stale_knowledge"
       sensitivity_level: "normal" | "sensitive" | "strictly_sensitive"
+      source_asset_relation:
+        | "inline_image"
+        | "screenshot"
+        | "attachment"
+        | "ocr_source"
+        | "supplemental_evidence"
+      source_block_type:
+        | "heading"
+        | "paragraph"
+        | "list_item"
+        | "table"
+        | "code"
+        | "message"
+        | "ocr_region"
+        | "repository_file"
+        | "repository_excerpt"
+        | "metadata"
+      space_member_role: "owner" | "editor" | "viewer"
+      space_type: "private" | "shared"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -643,6 +1181,29 @@ export const Constants = {
         "manual_file",
         "manual_screenshot",
       ],
+      citation_origin: ["ai", "user"],
+      citation_review_status: ["pending", "approved", "rejected"],
+      knowledge_change_origin: ["ai", "user", "system"],
+      knowledge_evidence_mode: ["cited", "personal_inference"],
+      knowledge_status: [
+        "ai_draft",
+        "pending_review",
+        "confirmed",
+        "rejected",
+        "archived",
+        "needs_review",
+      ],
+      knowledge_type: [
+        "concept",
+        "principle",
+        "method",
+        "scenario",
+        "case",
+        "fact",
+        "opinion",
+        "question",
+        "conclusion",
+      ],
       processing_state: [
         "queued",
         "processing",
@@ -650,7 +1211,36 @@ export const Constants = {
         "failed",
         "paused",
       ],
+      review_task_status: ["open", "completed", "dismissed"],
+      review_task_type: [
+        "knowledge_draft",
+        "low_confidence",
+        "sensitive_content",
+        "conflict",
+        "stale_knowledge",
+      ],
       sensitivity_level: ["normal", "sensitive", "strictly_sensitive"],
+      source_asset_relation: [
+        "inline_image",
+        "screenshot",
+        "attachment",
+        "ocr_source",
+        "supplemental_evidence",
+      ],
+      source_block_type: [
+        "heading",
+        "paragraph",
+        "list_item",
+        "table",
+        "code",
+        "message",
+        "ocr_region",
+        "repository_file",
+        "repository_excerpt",
+        "metadata",
+      ],
+      space_member_role: ["owner", "editor", "viewer"],
+      space_type: ["private", "shared"],
     },
   },
 } as const

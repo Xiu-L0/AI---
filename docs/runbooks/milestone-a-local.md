@@ -337,3 +337,19 @@ pnpm supabase stop
 ## 15. 下一步
 
 本地运行成功后，按照 `docs/runbooks/milestone-a-acceptance.md` 执行自动化门禁、Chrome/Edge 手工冒烟和后续用户协助的 30 次真实采集验收。历史累计指标继续按 16/23 记录；Stage 0 后的 30 次发布候选窗口单独计数。在发布候选窗口和失败样本复核完成前，不得宣布 Milestone A 的正式 90% 指标已经通过。Stage 0 不支持页面回执、finalize 中断恢复和补截图失败路径已有自动化证据，见验收文档第 11.3 节与失败样本复核。
+
+## 16. Stage 1A 迁移门禁
+
+在把知识 schema 应用到保存真实数据的本地项目前，先创建并校验新备份。数据库回滚方式是把已校验备份恢复到**另一个干净目标**，而不是在当前数据库上手动删除新列或新表。
+
+| 项目 | 值 |
+| --- | --- |
+| 迁移前备份时间戳 | 2026-09-06T05:24:52.617Z |
+| 校验结果 | pass |
+| 已应用迁移 | `202608110001_private_spaces`、`202608110002_evidence_and_knowledge`、`202608110003_finalize_into_private_space` |
+| 迁移前只读计数 | auth.users 1；source_items 15；capture_sessions 39；source_versions 28；source_messages 85；source_attachments 38；processing_jobs 28；extension_tokens 3 |
+| 迁移后只读计数 | 上表业务行数不变；spaces 1；space_members 1；source_items/processing_jobs 的 `space_id` 空值 0；`prepare_for_milestone_b` 行 0；`normalize_source` 行 28 |
+| Storage 对象数 | 48 |
+| 本机 E2E | 未完成；Playwright 连接 `127.0.0.1:54324` 被本机排除端口段拒绝。未改写 E2E 端口约定。 |
+
+本表只记录时间戳、迁移版本、计数和校验结果，不写入原文、对象名、密钥或 signed URL。当前 `127.0.0.1:54322` 数据环境不是恢复目标。
