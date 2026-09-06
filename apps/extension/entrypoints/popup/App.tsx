@@ -328,6 +328,12 @@ export function App({ services = defaultServices }: { services?: PopupServices }
 
   const state = displayState(currentItem);
   const receipt = storedReceipt(currentItem);
+  const pageSupported = context?.supported === true;
+  const selectedUnresolved =
+    currentItem !== null && isUnresolvedOutboxItem(currentItem);
+  const showHistoricalResult = pageSupported || selectedUnresolved;
+  const visibleState = showHistoricalResult ? state : "ready";
+  const visibleReceipt = showHistoricalResult ? receipt : null;
   const unresolved = useMemo(
     () => unresolvedItems(outboxItems),
     [outboxItems],
@@ -540,7 +546,7 @@ export function App({ services = defaultServices }: { services?: PopupServices }
           </button>
         </>
       ) : (
-        <p>可改用 Web 应用粘贴文字、文件或截图。</p>
+        <p>当前页面未采集；可改用 Web 应用保存。</p>
       )}
 
       {unresolved.length > 0 && (
@@ -563,21 +569,21 @@ export function App({ services = defaultServices }: { services?: PopupServices }
         </section>
       )}
 
-      {state === "complete" && receipt && (
+      {visibleState === "complete" && visibleReceipt && (
         <section>
           <h2>完整采集成功</h2>
           <p>
-            已保存 {receipt.savedMessageCount} 条消息、
-            {receipt.savedAttachmentCount} 个附件
+            已保存 {visibleReceipt.savedMessageCount} 条消息、
+            {visibleReceipt.savedAttachmentCount} 个附件
           </p>
         </section>
       )}
 
-      {state === "partial" && receipt && currentItem && (
+      {visibleState === "partial" && visibleReceipt && currentItem && (
         <section>
           <h2>部分内容未采集</h2>
           <ul>
-            {receipt.missingElements.map((item) => (
+            {visibleReceipt.missingElements.map((item) => (
               <li key={item}>{item}</li>
             ))}
           </ul>
@@ -591,16 +597,16 @@ export function App({ services = defaultServices }: { services?: PopupServices }
         </section>
       )}
 
-      {(state === "pending" ||
-        state === "uploading" ||
-        state === "finalizing") && (
+      {(visibleState === "pending" ||
+        visibleState === "uploading" ||
+        visibleState === "finalizing") && (
         <section aria-live="polite">
           <h2>服务器尚未确认保存</h2>
           <p>采集正在继续，请不要把当前状态视为成功。</p>
         </section>
       )}
 
-      {state === "retry_wait" && currentItem && (
+      {visibleState === "retry_wait" && currentItem && (
         <section>
           <h2>服务器尚未确认保存</h2>
           {currentItem.lastError && <p>{currentItem.lastError}</p>}
@@ -622,7 +628,7 @@ export function App({ services = defaultServices }: { services?: PopupServices }
         </section>
       )}
 
-      {state === "auth_paused" && currentItem && (
+      {visibleState === "auth_paused" && currentItem && (
         <section>
           <h2>扩展连接已失效，请重新配对</h2>
           {currentItem.lastError && <p>{currentItem.lastError}</p>}
@@ -632,7 +638,7 @@ export function App({ services = defaultServices }: { services?: PopupServices }
         </section>
       )}
 
-      {state === "terminal" && currentItem && (
+      {visibleState === "terminal" && currentItem && (
         <section>
           <h2>采集无法自动恢复，需要重新采集</h2>
           {currentItem.lastError && <p>{currentItem.lastError}</p>}
@@ -648,10 +654,10 @@ export function App({ services = defaultServices }: { services?: PopupServices }
         </section>
       )}
 
-      {receipt && (
+      {visibleReceipt && (
         <>
-          <p data-processing-status={receipt.processingStatus}>
-            {processingCopy[receipt.processingStatus]}
+          <p data-processing-status={visibleReceipt.processingStatus}>
+            {processingCopy[visibleReceipt.processingStatus]}
           </p>
           <button
             disabled={operation !== "idle"}

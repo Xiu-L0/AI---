@@ -400,6 +400,108 @@ describe("extension popup", () => {
     expect(screen.queryByText("采集失败")).not.toBeInTheDocument();
   });
 
+  it("does not treat a historical complete receipt as the current unsupported page result", async () => {
+    const complete = outboxItem();
+    const waiting = outboxItem({
+      captureId: null,
+      draft: { ...outboxItem().draft, title: "网络中断" },
+      id: "retry-unsupported",
+      lastError: "network unavailable",
+      nextAttemptAt: "2026-07-30T00:20:00.000Z",
+      receipt: null,
+      receiptStoredAt: null,
+      resolvedAt: null,
+      state: "retry_wait",
+      updatedAt: "2026-07-30T00:02:00.000Z",
+    });
+    const listOutbox = vi.fn<PopupServices["listOutbox"]>(async () => [
+      complete,
+      waiting,
+    ]);
+    render(
+      <App
+        services={services({
+          getCredential: vi.fn(async () => credential),
+          getPageContext: vi.fn(async () => ({
+            label: "当前页面暂不支持自动采集",
+            scopes: [],
+            supported: false,
+          })),
+          listOutbox,
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByText(/当前页面暂不支持自动采集/),
+    ).toBeVisible();
+    expect(
+      screen.getByText("当前页面未采集；可改用 Web 应用保存。"),
+    ).toBeVisible();
+    expect(screen.queryByText("完整采集成功")).not.toBeInTheDocument();
+    expect(screen.queryByText(/已保存 4 条消息/)).not.toBeInTheDocument();
+    expect(screen.queryByText("原文已保存，等待后台处理")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "网络中断 · 等待重试" }),
+    ).toBeVisible();
+    expect(listOutbox).toHaveBeenCalled();
+    expect(await listOutbox.mock.results[0]?.value).toEqual([
+      complete,
+      waiting,
+    ]);
+  });
+
+  it("hides a lone historical success when the current page is unsupported", async () => {
+    const complete = outboxItem();
+    const listOutbox = vi.fn<PopupServices["listOutbox"]>(async () => [complete]);
+    render(
+      <App
+        services={services({
+          getCredential: vi.fn(async () => credential),
+          getPageContext: vi.fn(async () => ({
+            label: "当前页面暂不支持自动采集",
+            scopes: [],
+            supported: false,
+          })),
+          listOutbox,
+          refresh: vi.fn(async () => complete),
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByText(/当前页面暂不支持自动采集/),
+    ).toBeVisible();
+    expect(
+      screen.getByText("当前页面未采集；可改用 Web 应用保存。"),
+    ).toBeVisible();
+    expect(screen.queryByText("完整采集成功")).not.toBeInTheDocument();
+    expect(screen.queryByText(/已保存 4 条消息/)).not.toBeInTheDocument();
+    expect(screen.queryByText("原文已保存，等待后台处理")).not.toBeInTheDocument();
+    expect(await listOutbox.mock.results[0]?.value).toEqual([complete]);
+  });
+
+  it("still shows a complete receipt on a supported ChatGPT page", async () => {
+    const complete = outboxItem();
+    render(
+      <App
+        services={services({
+          getCredential: vi.fn(async () => credential),
+          listOutbox: vi.fn(async () => [complete]),
+          refresh: vi.fn(async () => complete),
+        })}
+      />,
+    );
+
+    expect(await screen.findByText("当前来源：ChatGPT 网页版")).toBeVisible();
+    expect(await screen.findByText("完整采集成功")).toBeVisible();
+    expect(screen.getByText(/已保存 4 条消息、\s*1 个附件/)).toBeVisible();
+    expect(screen.getByText("原文已保存，等待后台处理")).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "立即重试" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("does not stay loading when extension state cannot be read", async () => {
     render(
       <App
