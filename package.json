@@ -12,10 +12,13 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
-    "supabase": "supabase"
+    "supabase": "supabase",
+    "backup:local": "node scripts/local-backup.mjs",
+    "backup:verify": "node scripts/verify-local-backup.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
+    "@supabase/supabase-js": "2.111.0",
     "jsdom": "^27.0.0",
     "supabase": "^2.110.0",
     "typescript": "^5.9.0",
