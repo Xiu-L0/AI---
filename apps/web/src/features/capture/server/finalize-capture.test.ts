@@ -83,6 +83,8 @@ describe("finalizeCaptureWithRepository", () => {
       firstRepository.commitFinalization,
     ).mock.calls[0]?.[0];
     expect(committedInput).toBeDefined();
+    expect(committedInput).not.toHaveProperty("spaceId");
+    expect(first).toEqual(receipt);
 
     const repository = createRepository({
       findReceiptByIdempotencyKey: vi.fn(async () => ({

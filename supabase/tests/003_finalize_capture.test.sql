@@ -1,6 +1,6 @@
 begin;
 
-select plan(15);
+select plan(19);
 
 insert into auth.users (id, email)
 values
@@ -165,9 +165,37 @@ select is(
       where capture_session_id = '20000000-0000-0000-0000-000000000021'
     )
       and status = 'queued'
+      and job_type = 'normalize_source'
   ),
   1,
   'successful finalization queues one processing job'
+);
+
+select is(
+  (
+    select item.space_id = public.ensure_private_space(item.owner_user_id)
+    from public.source_items as item
+    join public.capture_sessions as capture
+      on capture.source_item_id = item.id
+    where capture.id = '20000000-0000-0000-0000-000000000021'
+  ),
+  true,
+  'finalization assigns the owner private space without a client spaceId'
+);
+
+select is(
+  (
+    select job.space_id = item.space_id
+    from public.processing_jobs as job
+    join public.source_versions as version
+      on version.id = job.source_version_id
+    join public.source_items as item
+      on item.id = version.source_item_id
+    where version.capture_session_id = '20000000-0000-0000-0000-000000000021'
+      and job.job_type = 'normalize_source'
+  ),
+  true,
+  'the queued normalize_source job stays in the same private space'
 );
 
 set local role service_role;
@@ -260,6 +288,36 @@ select is(
     where id = '20000000-0000-0000-0000-000000000021'
   ),
   'the duplicate capture points to the existing durable source version'
+);
+
+select is(
+  (
+    select count(*)::integer
+    from public.processing_jobs
+    where source_version_id = (
+      select result_source_version_id
+      from public.capture_sessions
+      where id = '20000000-0000-0000-0000-000000000021'
+    )
+      and job_type = 'normalize_source'
+  ),
+  1,
+  'idempotent finalization reuses the same normalize_source job'
+);
+
+select is(
+  (
+    select item.space_id
+    from public.source_items as item
+    join public.capture_sessions as capture
+      on capture.source_item_id = item.id
+    where capture.id = '20000000-0000-0000-0000-000000000021'
+  )
+  is distinct from public.ensure_private_space(
+    '00000000-0000-0000-0000-000000000022'
+  ),
+  true,
+  'owner A capture cannot land in owner B private space'
 );
 
 set local role service_role;

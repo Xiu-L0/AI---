@@ -345,6 +345,7 @@ function createFinalizeCaptureRepository(): FinalizeCaptureRepository {
           .select("status")
           .eq("source_version_id", version.id)
           .eq("owner_user_id", ownerUserId)
+          .eq("job_type", "normalize_source")
           .single(),
       ]);
       if (messageError || attachmentError || jobError) {

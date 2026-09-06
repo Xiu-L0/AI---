@@ -442,6 +442,10 @@ export type Database = {
         }
         Returns: Json
       }
+      ensure_private_space: {
+        Args: { p_owner_user_id: string }
+        Returns: string
+      }
       finalize_capture: {
         Args: {
           p_attachments: Json
