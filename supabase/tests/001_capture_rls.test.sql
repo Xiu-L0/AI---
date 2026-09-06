@@ -152,7 +152,7 @@ insert into public.processing_jobs (
 values (
   '00000000-0000-0000-0000-000000000001',
   '30000000-0000-0000-0000-000000000001',
-  'prepare_for_milestone_b'
+  'normalize_source'
 );
 
 insert into public.extension_tokens (
