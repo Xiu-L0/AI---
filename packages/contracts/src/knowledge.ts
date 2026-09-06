@@ -84,7 +84,7 @@ export const KnowledgeExtractionResultSchema = z
     schemaVersion: z.literal("knowledge-extraction.v1"),
     promptVersion: z.string().min(1).max(100),
     sourceVersionId: z.uuid(),
-    knowledgeDrafts: z.array(KnowledgeDraftSchema).max(100),
+    knowledgeDrafts: z.array(KnowledgeDraftSchema).min(1).max(12),
     citations: z.array(KnowledgeCitationDraftSchema).max(500)
   })
   .strict();

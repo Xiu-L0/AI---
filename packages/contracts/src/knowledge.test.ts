@@ -105,6 +105,20 @@ describe("knowledge contracts", () => {
         extraction({ ownerUserId: "should-not-leak" })
       ).success
     ).toBe(false);
+    expect(
+      KnowledgeExtractionResultSchema.safeParse(
+        extraction({ knowledgeDrafts: [] })
+      ).success
+    ).toBe(false);
+    expect(
+      KnowledgeExtractionResultSchema.safeParse(
+        extraction({
+          knowledgeDrafts: Array.from({ length: 13 }, (_, index) =>
+            draft({ clientKey: `draft-${index}` })
+          )
+        })
+      ).success
+    ).toBe(false);
   });
 
   it("accepts an explicit human review decision", () => {
