@@ -2,14 +2,14 @@ project_id = "recall-ai"
 
 [api]
 enabled = true
-port = 54321
+port = 55321
 schemas = ["public", "graphql_public"]
 extra_search_path = ["public", "extensions"]
 max_rows = 1000
 
 [db]
-port = 54322
-shadow_port = 54320
+port = 55322
+shadow_port = 55320
 major_version = 17
 
 [db.migrations]
@@ -25,12 +25,12 @@ enabled = true
 
 [studio]
 enabled = true
-port = 54323
+port = 55323
 api_url = "http://127.0.0.1"
 
 [local_smtp]
 enabled = true
-port = 54324
+port = 55324
 
 [storage]
 enabled = true
@@ -62,5 +62,5 @@ inspector_port = 8083
 
 [analytics]
 enabled = true
-port = 54327
+port = 55327
 backend = "postgres"

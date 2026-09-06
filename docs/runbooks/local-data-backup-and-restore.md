@@ -12,7 +12,7 @@
 - 每个 `source_attachments.storage_path` 都有对应的已下载对象。
 - schema/data SQL 与清单中不得出现 service-role JWT、signed URL 查询参数或 bearer token。
 - schema 与 data 只允许恢复到**另一个**临时 PostgreSQL/Supabase 目标；其 project ID 与端口必须不同于当前数据环境。
-- 当前 `127.0.0.1:54322` 数据库永远不是恢复目标。
+- 当前 `127.0.0.1:55322` 数据库永远不是恢复目标。
 
 `pnpm supabase db reset` 会丢弃当前本地数据。对保存真实测试数据的项目禁止执行 reset、`supabase stop --no-backup` 或删除 Docker volume。官方本地工作流也提醒 reset 会重建数据库，见 [CLI local workflows](https://supabase.com/docs/guides/local-development/cli-workflows)。
 
@@ -49,13 +49,13 @@ pnpm backup:verify -- backups/<timestamp>
 只在一次性临时目录/项目中恢复，验证后销毁临时目标。不要对当前 `recall-ai` 本地栈执行 restore 或 reset。
 
 1. 另选一个空目录作为临时项目，例如 `%TEMP%\recall-backup-restore-drill`。
-2. 在该目录初始化一个**不同** `project_id` 的本地 Supabase，并在启动前分配非默认端口，避免占用 `54320`–`54324`、`54327`。
+2. 在该目录初始化一个**不同** `project_id` 的本地 Supabase，并在启动前分配非默认端口，避免占用 `55320`–`55324`、`55327`。
 3. 先恢复 `schema.sql`，再恢复 `data.sql`。
 4. 对 `auth.users` 与全部现有业务表执行只读 `count(*)`，与 `manifest.json` 的 `tableRowCounts` 逐表比较。
 5. 抽查清单中的 Storage 对象字节数与 SHA-256，确认附件可从临时目标重新上传或按对象文件核验。
 6. 记录通过/失败后销毁该临时项目。允许删除一次性目标；不允许删除当前数据环境的 volume。
 
-示例对照查询（在临时库执行，不要针对 `127.0.0.1:54322`）：
+示例对照查询（在临时库执行，不要针对 `127.0.0.1:55322`）：
 
 ```sql
 select 'auth.users' as name, count(*) from auth.users

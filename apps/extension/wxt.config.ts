@@ -60,7 +60,7 @@ export default defineConfig({
     host_permissions: [
       "https://chatgpt.com/*",
       hostPermission("WXT_PUBLIC_API_ORIGIN", "http://localhost:3000"),
-      hostPermission("WXT_PUBLIC_SUPABASE_URL", "http://127.0.0.1:54321"),
+      hostPermission("WXT_PUBLIC_SUPABASE_URL", "http://127.0.0.1:55321"),
       ...optionalTestHostPermission("WXT_TEST_FIXTURE_ORIGIN"),
     ],
   },

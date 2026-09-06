@@ -253,7 +253,7 @@ function buildTestExtension(): string {
     WXT_PUBLIC_API_ORIGIN:
       process.env.WXT_PUBLIC_API_ORIGIN ?? "http://localhost:3000",
     WXT_PUBLIC_SUPABASE_URL:
-      process.env.WXT_PUBLIC_SUPABASE_URL ?? "http://127.0.0.1:54321",
+      process.env.WXT_PUBLIC_SUPABASE_URL ?? "http://127.0.0.1:55321",
   };
   delete productionEnvironment.WXT_TEST_BUILD;
   delete productionEnvironment.WXT_TEST_FIXTURE_ORIGIN;
@@ -262,7 +262,8 @@ function buildTestExtension(): string {
     runExtensionBuild({
       ...process.env,
       WXT_PUBLIC_API_ORIGIN: extensionApiOrigin,
-      WXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321",
+      WXT_PUBLIC_SUPABASE_URL:
+        process.env.WXT_PUBLIC_SUPABASE_URL ?? "http://127.0.0.1:55321",
       WXT_TEST_BUILD: "1",
       WXT_TEST_FIXTURE_ORIGIN: fixtureOrigin,
     });

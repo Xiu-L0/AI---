@@ -37,7 +37,7 @@ git --version
 
 如果 `docker version` 只能显示客户端信息，或报告无法连接 daemon，请先打开 Docker Desktop，等待界面显示 Engine 正常运行。
 
-本地 Supabase 会使用多个端口，至少确保 `3000`、`54320`、`54321`、`54322`、`54323`、`54324`、`54327` 和 `8083` 未被其他程序占用。
+本地 Supabase 会使用多个端口，至少确保 `3000`、`55320`、`55321`、`55322`、`55323`、`55324`、`55327` 和 `8083` 未被其他程序占用。
 
 ## 3. 安装依赖并启动 Supabase
 
@@ -51,7 +51,7 @@ pnpm supabase db reset
 
 以上命令分别安装锁定依赖、启动本地 Supabase 容器，并从仓库迁移重新建立数据库、私有 `raw-captures` Storage bucket 和所有权隔离策略。
 
-`pnpm supabase db reset` 会丢弃当前本地数据库和 Storage 中的真实测试数据。只允许在确认本地栈为空、或已按 `docs/runbooks/local-data-backup-and-restore.md` 完成可验证备份之后的一次性空环境中使用。对已有 ChatGPT 测试数据的 `127.0.0.1:54322` 项目禁止 reset、禁止 `supabase stop --no-backup`，也禁止删除 Docker volume。后续知识模型迁移前必须先通过该备份手册的校验与临时恢复演练。
+`pnpm supabase db reset` 会丢弃当前本地数据库和 Storage 中的真实测试数据。只允许在确认本地栈为空、或已按 `docs/runbooks/local-data-backup-and-restore.md` 完成可验证备份之后的一次性空环境中使用。对已有 ChatGPT 测试数据的 `127.0.0.1:55322` 项目禁止 reset、禁止 `supabase stop --no-backup`，也禁止删除 Docker volume。后续知识模型迁移前必须先通过该备份手册的校验与临时恢复演练。
 
 检查本地服务状态：
 
@@ -64,9 +64,9 @@ pnpm supabase status
 常用本地入口：
 
 - Web 应用：`http://127.0.0.1:3000`
-- Supabase API：`http://127.0.0.1:54321`
-- Supabase Studio：`http://127.0.0.1:54323`
-- 本地测试邮箱：`http://127.0.0.1:54324`
+- Supabase API：`http://127.0.0.1:55321`
+- Supabase Studio：`http://127.0.0.1:55323`
+- 本地测试邮箱：`http://127.0.0.1:55324`
 
 ## 4. 配置本地环境变量
 
@@ -100,7 +100,7 @@ WXT_TEST_FIXTURE_ORIGIN
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` 使用本地 publishable/anon 开发密钥。
 - `SUPABASE_SERVICE_ROLE_KEY` 只允许出现在 Web 服务端本地环境中，不得进入扩展环境或浏览器构建。
 - `WXT_PUBLIC_API_ORIGIN` 使用 Recall Web API 的纯 origin，本地通常为 `http://localhost:3000`。
-- `WXT_PUBLIC_SUPABASE_URL` 使用 Supabase 项目的纯 base origin，本地通常为 `http://127.0.0.1:54321`；不能追加 `/storage/v1`、查询参数、用户名、密码或其他路径。
+- `WXT_PUBLIC_SUPABASE_URL` 使用 Supabase 项目的纯 base origin，本地通常为 `http://127.0.0.1:55321`；不能追加 `/storage/v1`、查询参数、用户名、密码或其他路径。
 - 非本地部署时，上述两个扩展来源必须使用 HTTPS。
 - 不要给扩展增加 Supabase publishable key 或 service-role key。扩展附件上传只使用服务端签发的短期 signed upload token。
 - 测试 fixture 来源采用双门控：只有同时满足 `WXT_TEST_BUILD=1` 且提供 `WXT_TEST_FIXTURE_ORIGIN` 时，测试来源才会进入扩展 host permissions、内容脚本匹配和 ChatGPT 页面识别。
@@ -115,12 +115,12 @@ WXT_TEST_FIXTURE_ORIGIN
 
 本项目关闭公开注册，且 `supabase/seed.sql` 不提交个人用户。因此第一次本地使用需要手工创建一个仅用于本机的个人用户：
 
-1. 打开 Supabase Studio：`http://127.0.0.1:54323`。
+1. 打开 Supabase Studio：`http://127.0.0.1:55323`。
 2. 进入 Authentication/Users。
 3. 使用界面中的“添加用户”或同等入口创建一个测试邮箱用户，并将邮箱标记为已确认。
 4. 打开 `http://127.0.0.1:3000/sign-in`。
 5. 输入刚创建的邮箱，点击“发送登录链接”。
-6. 打开本地测试邮箱 `http://127.0.0.1:54324`。
+6. 打开本地测试邮箱 `http://127.0.0.1:55324`。
 7. 打开最新邮件中的登录链接；完成后应返回 `http://127.0.0.1:3000/`。
 
 执行 `pnpm supabase db reset` 会重建本地数据库，因此先前手工创建的本地用户也会被清除，需要重新创建。不要在迁移或 seed 中加入真实个人邮箱。
@@ -289,7 +289,7 @@ Milestone A 没有静默丢弃或忽略未解决失败的操作。关闭弹窗�
 
 - 确认用户已先在本地 Studio 创建且邮箱已确认。
 - 确认登录邮箱与 Studio 中完全一致。
-- 打开 `http://127.0.0.1:54324` 检查本地邮箱，而不是等待真实互联网邮箱。
+- 打开 `http://127.0.0.1:55324` 检查本地邮箱，而不是等待真实互联网邮箱。
 - 确认 Web 使用 `http://127.0.0.1:3000`，与本地 Supabase redirect 配置一致。
 
 ### 扩展无法连接 Web 或 Supabase
@@ -332,7 +332,7 @@ pnpm supabase stop
 
 ## 14. 数据备份
 
-当前本地项目已包含真实测试数据时，使用 `docs/runbooks/local-data-backup-and-restore.md` 创建并校验备份。恢复只能针对一次性临时项目，不能以当前 `127.0.0.1:54322` 为恢复目标。
+当前本地项目已包含真实测试数据时，使用 `docs/runbooks/local-data-backup-and-restore.md` 创建并校验备份。恢复只能针对一次性临时项目，不能以当前 `127.0.0.1:55322` 为恢复目标。
 
 ## 15. 下一步
 
@@ -350,6 +350,6 @@ pnpm supabase stop
 | 迁移前只读计数 | auth.users 1；source_items 15；capture_sessions 39；source_versions 28；source_messages 85；source_attachments 38；processing_jobs 28；extension_tokens 3 |
 | 迁移后只读计数 | 上表业务行数不变；spaces 1；space_members 1；source_items/processing_jobs 的 `space_id` 空值 0；`prepare_for_milestone_b` 行 0；`normalize_source` 行 28 |
 | Storage 对象数 | 48 |
-| 本机 E2E | 未完成；Playwright 连接 `127.0.0.1:54324` 被本机排除端口段拒绝。未改写 E2E 端口约定。 |
+| 本机 E2E | 2026-09-06 全部 12 项通过。本地栈端口：API `55321`、DB `55322`、Studio `55323`、Mailpit `55324`、analytics `55327`。 |
 
-本表只记录时间戳、迁移版本、计数和校验结果，不写入原文、对象名、密钥或 signed URL。当前 `127.0.0.1:54322` 数据环境不是恢复目标。
+本表只记录时间戳、迁移版本、计数和校验结果，不写入原文、对象名、密钥或 signed URL。当前 `127.0.0.1:55322` 数据环境不是恢复目标。

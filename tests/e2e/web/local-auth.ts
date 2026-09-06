@@ -40,9 +40,12 @@ export async function callAuthAdmin(path: string, init: RequestInit) {
   });
 }
 
+const mailpitOrigin =
+  process.env.MAILPIT_URL ?? "http://127.0.0.1:55324";
+
 async function findMagicLink(email: string) {
   const messagesResponse = await fetch(
-    "http://127.0.0.1:54324/api/v1/messages",
+    `${mailpitOrigin}/api/v1/messages`,
   );
   if (!messagesResponse.ok) {
     return null;
@@ -63,7 +66,7 @@ async function findMagicLink(email: string) {
   }
 
   const messageResponse = await fetch(
-    `http://127.0.0.1:54324/api/v1/message/${summary.ID}`,
+    `${mailpitOrigin}/api/v1/message/${summary.ID}`,
   );
   if (!messageResponse.ok) {
     return null;

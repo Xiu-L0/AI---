@@ -31,7 +31,7 @@ function supabaseOrigin(override?: string): string {
   const configured =
     override ??
     import.meta.env.WXT_PUBLIC_SUPABASE_URL ??
-    "http://127.0.0.1:54321";
+    "http://127.0.0.1:55321";
 
   let url: URL;
   try {
