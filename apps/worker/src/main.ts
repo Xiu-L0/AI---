@@ -1,7 +1,13 @@
 import { createClient } from "@supabase/supabase-js";
 
 import { loadWorkerConfig } from "./config";
+import { createBuildSourceBlocksProcessor } from "./processors/build-source-blocks";
+import { createNormalizeSourceProcessor } from "./processors/normalize-source";
 import { PostgresProcessingQueue } from "./queue/processing-queue";
+import {
+  PostgresSourceRepository,
+  type SourceQueryClient,
+} from "./repositories/source-repository";
 import { installWorkerShutdown, runWorkerLoop } from "./worker-loop";
 
 async function main() {
@@ -19,11 +25,18 @@ async function main() {
     config.workerId,
     config.leaseSeconds,
   );
+  const sources = new PostgresSourceRepository(
+    supabase as unknown as SourceQueryClient,
+    config.workerId,
+  );
 
   try {
     await runWorkerLoop({
       queue,
-      processors: {},
+      processors: {
+        normalize_source: createNormalizeSourceProcessor(sources),
+        build_source_blocks: createBuildSourceBlocksProcessor(sources),
+      },
       batchSize: config.batchSize,
       pollIntervalMs: config.pollIntervalMs,
       clock: { now: () => new Date() },

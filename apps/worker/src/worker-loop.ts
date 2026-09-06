@@ -53,11 +53,23 @@ export class UnknownJobTypeError extends Error {
   }
 }
 
+export class ProcessorError extends Error {
+  readonly code: string;
+  readonly retryable: boolean;
+
+  constructor(code: string, message: string, retryable = false) {
+    super(message);
+    this.name = "ProcessorError";
+    this.code = code;
+    this.retryable = retryable;
+  }
+}
+
 function toFailure(error: unknown): ProcessingFailure {
-  if (error instanceof UnknownJobTypeError) {
+  if (error instanceof UnknownJobTypeError || error instanceof ProcessorError) {
     return {
       errorCode: error.code,
-      errorDetail: error.message,
+      errorDetail: error.message.slice(0, 2000),
       retryable: error.retryable,
     };
   }
