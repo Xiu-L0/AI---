@@ -5,6 +5,7 @@ import {
   getCaptureDetails,
   isValidCaptureSourceItemId,
 } from "@/features/capture/server/list-captures";
+import { getCaptureKnowledgeProvenance } from "@/features/knowledge/server/get-knowledge-review";
 import { requireUser } from "@/lib/supabase/server";
 
 const sourceLabels = {
@@ -54,6 +55,13 @@ export default async function CaptureDetailsPage({
   if (!capture) {
     notFound();
   }
+  const provenance = await getCaptureKnowledgeProvenance(
+    user.id,
+    capture.versions.map((version) => version.id),
+  );
+  const provenanceByVersion = new Map(
+    provenance.map((entry) => [entry.sourceVersionId, entry]),
+  );
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10 lg:px-10">
@@ -110,6 +118,15 @@ export default async function CaptureDetailsPage({
                 <span className="rounded-full bg-blue-50 px-3 py-1 text-blue-700">
                   后台状态：{version.processingStatus}
                 </span>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
+                  证据块 {provenanceByVersion.get(version.id)?.blockCount ?? 0}
+                </span>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
+                  处理运行：{provenanceByVersion.get(version.id)?.runStatus ?? version.processingStatus}
+                </span>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
+                  已提取草稿 {provenanceByVersion.get(version.id)?.draftCount ?? 0}
+                </span>
               </div>
             </div>
 
@@ -146,6 +163,7 @@ export default async function CaptureDetailsPage({
                   {version.messages.map((message) => (
                     <li
                       className="rounded-xl border border-slate-200 bg-slate-50 p-4"
+                      id={`message:${message.externalMessageId}/body`}
                       key={message.id}
                     >
                       <p className="text-xs font-semibold text-slate-500">

@@ -2,12 +2,14 @@ import Link from "next/link";
 
 type AppSidebarProps = {
   exceptionCount: number;
+  reviewCount: number;
 };
 
-export function AppSidebar({ exceptionCount }: AppSidebarProps) {
+export function AppSidebar({ exceptionCount, reviewCount }: AppSidebarProps) {
   const links = [
     { href: "/", label: "今天" },
     { href: "/captures", label: "采集记录" },
+    { href: "/knowledge", label: `知识审核 ${reviewCount}` },
     { href: "/exceptions", label: `异常 ${exceptionCount}` },
     { href: "/settings", label: "设置" },
   ];
