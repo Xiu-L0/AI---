@@ -51,6 +51,8 @@ pnpm supabase db reset
 
 以上命令分别安装锁定依赖、启动本地 Supabase 容器，并从仓库迁移重新建立数据库、私有 `raw-captures` Storage bucket 和所有权隔离策略。
 
+`pnpm supabase db reset` 会丢弃当前本地数据库和 Storage 中的真实测试数据。只允许在确认本地栈为空、或已按 `docs/runbooks/local-data-backup-and-restore.md` 完成可验证备份之后的一次性空环境中使用。对已有 ChatGPT 测试数据的 `127.0.0.1:54322` 项目禁止 reset、禁止 `supabase stop --no-backup`，也禁止删除 Docker volume。后续知识模型迁移前必须先通过该备份手册的校验与临时恢复演练。
+
 检查本地服务状态：
 
 ```powershell
@@ -328,6 +330,10 @@ pnpm supabase stop
 
 停止服务不会自动删除仓库文件。需要保留本地数据库以便下次继续时，不要使用会删除 volume 的额外参数。
 
-## 14. 下一步
+## 14. 数据备份
+
+当前本地项目已包含真实测试数据时，使用 `docs/runbooks/local-data-backup-and-restore.md` 创建并校验备份。恢复只能针对一次性临时项目，不能以当前 `127.0.0.1:54322` 为恢复目标。
+
+## 15. 下一步
 
 本地运行成功后，按照 `docs/runbooks/milestone-a-acceptance.md` 执行自动化门禁、Chrome/Edge 手工冒烟和后续用户协助的 30 次真实采集验收。在 30 次真实采集和失败样本复核完成前，不得宣布 Milestone A 的正式 90% 指标已经通过，也不得开始编写 Milestone B 实施计划。
