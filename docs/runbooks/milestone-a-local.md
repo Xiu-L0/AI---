@@ -336,4 +336,4 @@ pnpm supabase stop
 
 ## 15. 下一步
 
-本地运行成功后，按照 `docs/runbooks/milestone-a-acceptance.md` 执行自动化门禁、Chrome/Edge 手工冒烟和后续用户协助的 30 次真实采集验收。在 30 次真实采集和失败样本复核完成前，不得宣布 Milestone A 的正式 90% 指标已经通过，也不得开始编写 Milestone B 实施计划。
+本地运行成功后，按照 `docs/runbooks/milestone-a-acceptance.md` 执行自动化门禁、Chrome/Edge 手工冒烟和后续用户协助的 30 次真实采集验收。历史累计指标继续按 16/23 记录；Stage 0 后的 30 次发布候选窗口单独计数。在发布候选窗口和失败样本复核完成前，不得宣布 Milestone A 的正式 90% 指标已经通过。Stage 0 不支持页面回执、finalize 中断恢复和补截图失败路径已有自动化证据，见验收文档第 11.3 节与失败样本复核。
