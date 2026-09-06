@@ -1,30 +1,28 @@
-import { loadWorkerConfig } from "./config";
-import {
-  installWorkerShutdown,
-  runWorkerLoop,
-  type ProcessingQueue,
-} from "./worker-loop";
+import { createClient } from "@supabase/supabase-js";
 
-const idleQueue: ProcessingQueue = {
-  async claim() {
-    return [];
-  },
-  async complete() {
-    return undefined;
-  },
-  async fail() {
-    return undefined;
-  },
-};
+import { loadWorkerConfig } from "./config";
+import { PostgresProcessingQueue } from "./queue/processing-queue";
+import { installWorkerShutdown, runWorkerLoop } from "./worker-loop";
 
 async function main() {
   const config = loadWorkerConfig(process.env);
   const abort = new AbortController();
   const restore = installWorkerShutdown(abort);
+  const supabase = createClient(config.supabaseUrl, config.supabaseServiceRoleKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+  const queue = new PostgresProcessingQueue(
+    supabase,
+    config.workerId,
+    config.leaseSeconds,
+  );
 
   try {
     await runWorkerLoop({
-      queue: idleQueue,
+      queue,
       processors: {},
       batchSize: config.batchSize,
       pollIntervalMs: config.pollIntervalMs,

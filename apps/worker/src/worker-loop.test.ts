@@ -35,6 +35,9 @@ function createQueue(claimImpl: ProcessingQueue["claim"]): {
     failed,
     queue: {
       claim: claimImpl,
+      async heartbeat() {
+        return undefined;
+      },
       async complete(claimed, result) {
         completed.push({ job: claimed, result });
       },

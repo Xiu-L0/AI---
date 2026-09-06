@@ -22,6 +22,7 @@ export type ProcessingFailure = {
 
 export interface ProcessingQueue {
   claim(limit: number): Promise<ClaimedJob[]>;
+  heartbeat(job: ClaimedJob): Promise<void>;
   complete(job: ClaimedJob, result: ProcessingResult): Promise<void>;
   fail(job: ClaimedJob, failure: ProcessingFailure): Promise<void>;
 }
