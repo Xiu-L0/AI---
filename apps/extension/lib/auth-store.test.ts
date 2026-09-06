@@ -18,9 +18,12 @@ describe("auth store", () => {
   it("stores the token only in extension local storage", async () => {
     await saveExtensionCredential(credential, fakeBrowser.storage.local);
 
-    expect(await getExtensionCredential(fakeBrowser.storage.local)).toEqual(
-      credential,
-    );
+    expect(
+      await getExtensionCredential(
+        fakeBrowser.storage.local,
+        new Date("2026-08-01T00:00:00.000Z"),
+      ),
+    ).toEqual(credential);
     expect(await fakeBrowser.storage.sync.get(null)).toEqual({});
 
     await clearExtensionCredential(fakeBrowser.storage.local);
