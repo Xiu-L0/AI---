@@ -258,6 +258,7 @@ export type Database = {
           created_by_user_id: string
           current_version: number
           evidence_mode: Database["public"]["Enums"]["knowledge_evidence_mode"]
+          extraction_key: string | null
           freshness_status: string
           human_locked_fields: string[]
           id: string
@@ -268,6 +269,7 @@ export type Database = {
           limitations: string[]
           owner_user_id: string
           review_after: string | null
+          source_version_id: string | null
           space_id: string
           status: Database["public"]["Enums"]["knowledge_status"]
           title: string
@@ -280,6 +282,7 @@ export type Database = {
           created_by_user_id: string
           current_version?: number
           evidence_mode?: Database["public"]["Enums"]["knowledge_evidence_mode"]
+          extraction_key?: string | null
           freshness_status?: string
           human_locked_fields?: string[]
           id?: string
@@ -290,6 +293,7 @@ export type Database = {
           limitations?: string[]
           owner_user_id: string
           review_after?: string | null
+          source_version_id?: string | null
           space_id: string
           status?: Database["public"]["Enums"]["knowledge_status"]
           title: string
@@ -302,6 +306,7 @@ export type Database = {
           created_by_user_id?: string
           current_version?: number
           evidence_mode?: Database["public"]["Enums"]["knowledge_evidence_mode"]
+          extraction_key?: string | null
           freshness_status?: string
           human_locked_fields?: string[]
           id?: string
@@ -312,12 +317,20 @@ export type Database = {
           limitations?: string[]
           owner_user_id?: string
           review_after?: string | null
+          source_version_id?: string | null
           space_id?: string
           status?: Database["public"]["Enums"]["knowledge_status"]
           title?: string
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "knowledge_items_source_version_owner_fk"
+            columns: ["source_version_id", "owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "source_versions"
+            referencedColumns: ["id", "owner_user_id"]
+          },
           {
             foreignKeyName: "knowledge_items_space_owner_fk"
             columns: ["space_id", "owner_user_id"]
@@ -372,15 +385,27 @@ export type Database = {
             referencedRelation: "knowledge_items"
             referencedColumns: ["id", "owner_user_id", "space_id"]
           },
+          {
+            foreignKeyName: "knowledge_versions_processor_run_owner_space_fk"
+            columns: ["processor_run_id", "owner_user_id", "space_id"]
+            isOneToOne: false
+            referencedRelation: "processing_runs"
+            referencedColumns: ["id", "owner_user_id", "space_id"]
+          },
         ]
       }
       processing_jobs: {
         Row: {
           attempt_count: number
+          completed_at: string | null
           created_at: string
           failure_reason: string | null
           id: string
           job_type: string
+          last_started_at: string | null
+          lease_expires_at: string | null
+          locked_by: string | null
+          max_attempts: number
           next_attempt_at: string
           owner_user_id: string
           source_version_id: string
@@ -390,10 +415,15 @@ export type Database = {
         }
         Insert: {
           attempt_count?: number
+          completed_at?: string | null
           created_at?: string
           failure_reason?: string | null
           id?: string
           job_type: string
+          last_started_at?: string | null
+          lease_expires_at?: string | null
+          locked_by?: string | null
+          max_attempts?: number
           next_attempt_at?: string
           owner_user_id: string
           source_version_id: string
@@ -403,10 +433,15 @@ export type Database = {
         }
         Update: {
           attempt_count?: number
+          completed_at?: string | null
           created_at?: string
           failure_reason?: string | null
           id?: string
           job_type?: string
+          last_started_at?: string | null
+          lease_expires_at?: string | null
+          locked_by?: string | null
+          max_attempts?: number
           next_attempt_at?: string
           owner_user_id?: string
           source_version_id?: string
@@ -427,6 +462,84 @@ export type Database = {
             columns: ["source_version_id", "owner_user_id"]
             isOneToOne: false
             referencedRelation: "source_versions"
+            referencedColumns: ["id", "owner_user_id"]
+          },
+        ]
+      }
+      processing_runs: {
+        Row: {
+          attempt: number
+          error_code: string | null
+          error_detail: string | null
+          estimated_cost: number | null
+          finished_at: string | null
+          id: string
+          input_scope: Json | null
+          model: string | null
+          owner_user_id: string
+          processing_job_id: string
+          processor_type: string
+          prompt_or_pipeline_version: string | null
+          provider: string | null
+          result_summary: string | null
+          space_id: string
+          started_at: string
+          status: Database["public"]["Enums"]["processing_state"]
+          usage_json: Json | null
+        }
+        Insert: {
+          attempt: number
+          error_code?: string | null
+          error_detail?: string | null
+          estimated_cost?: number | null
+          finished_at?: string | null
+          id?: string
+          input_scope?: Json | null
+          model?: string | null
+          owner_user_id: string
+          processing_job_id: string
+          processor_type: string
+          prompt_or_pipeline_version?: string | null
+          provider?: string | null
+          result_summary?: string | null
+          space_id: string
+          started_at?: string
+          status?: Database["public"]["Enums"]["processing_state"]
+          usage_json?: Json | null
+        }
+        Update: {
+          attempt?: number
+          error_code?: string | null
+          error_detail?: string | null
+          estimated_cost?: number | null
+          finished_at?: string | null
+          id?: string
+          input_scope?: Json | null
+          model?: string | null
+          owner_user_id?: string
+          processing_job_id?: string
+          processor_type?: string
+          prompt_or_pipeline_version?: string | null
+          provider?: string | null
+          result_summary?: string | null
+          space_id?: string
+          started_at?: string
+          status?: Database["public"]["Enums"]["processing_state"]
+          usage_json?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "processing_runs_job_owner_space_fk"
+            columns: ["processing_job_id", "owner_user_id", "space_id"]
+            isOneToOne: false
+            referencedRelation: "processing_jobs"
+            referencedColumns: ["id", "owner_user_id", "space_id"]
+          },
+          {
+            foreignKeyName: "processing_runs_space_owner_fk"
+            columns: ["space_id", "owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "spaces"
             referencedColumns: ["id", "owner_user_id"]
           },
         ]
@@ -912,8 +1025,44 @@ export type Database = {
         Args: { p_changed_fields: string[]; p_locked_fields: string[] }
         Returns: undefined
       }
+      assert_processing_job_ancestry: {
+        Args: { p_job: Database["public"]["Tables"]["processing_jobs"]["Row"] }
+        Returns: undefined
+      }
       assert_source_version_capture_limits: {
         Args: { checked_source_version_id: string }
+        Returns: undefined
+      }
+      claim_processing_jobs: {
+        Args: { p_lease_seconds: number; p_limit: number; p_worker_id: string }
+        Returns: {
+          attempt: number
+          job_id: string
+          job_type: string
+          lease_expires_at: string
+          owner_user_id: string
+          run_id: string
+          source_version_id: string
+          space_id: string
+        }[]
+      }
+      complete_processing_job: {
+        Args: {
+          p_job_id: string
+          p_result_summary: string
+          p_run_id: string
+          p_usage_json: Json
+          p_worker_id: string
+        }
+        Returns: undefined
+      }
+      enqueue_followup_processing_job: {
+        Args: {
+          p_job_id: string
+          p_job_type: string
+          p_run_id: string
+          p_worker_id: string
+        }
         Returns: undefined
       }
       ensure_private_space: {
@@ -929,6 +1078,17 @@ export type Database = {
         }
         Returns: Json
       }
+      fail_processing_job: {
+        Args: {
+          p_error_code: string
+          p_error_detail: string
+          p_job_id: string
+          p_retryable: boolean
+          p_run_id: string
+          p_worker_id: string
+        }
+        Returns: undefined
+      }
       finalize_capture: {
         Args: {
           p_attachments: Json
@@ -942,6 +1102,15 @@ export type Database = {
           p_raw_text: string
         }
         Returns: Json
+      }
+      heartbeat_processing_job: {
+        Args: {
+          p_job_id: string
+          p_lease_seconds: number
+          p_run_id: string
+          p_worker_id: string
+        }
+        Returns: undefined
       }
       is_valid_attachment_manifest: {
         Args: { manifest: Json }
@@ -959,11 +1128,75 @@ export type Database = {
         Args: { p_values: string[] }
         Returns: boolean
       }
+      lock_claimed_processing_job: {
+        Args: {
+          p_expected_job_type: string
+          p_job_id: string
+          p_run_id: string
+          p_worker_id: string
+        }
+        Returns: {
+          attempt_count: number
+          completed_at: string | null
+          created_at: string
+          failure_reason: string | null
+          id: string
+          job_type: string
+          last_started_at: string | null
+          lease_expires_at: string | null
+          locked_by: string | null
+          max_attempts: number
+          next_attempt_at: string
+          owner_user_id: string
+          source_version_id: string
+          space_id: string
+          status: Database["public"]["Enums"]["processing_state"]
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "processing_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      persist_knowledge_extraction: {
+        Args: {
+          p_job_id: string
+          p_payload: Json
+          p_prompt_version: string
+          p_run_id: string
+          p_worker_id: string
+        }
+        Returns: Json
+      }
+      processing_job_backoff: { Args: { p_attempt: number }; Returns: string }
+      replace_source_blocks_and_enqueue_extract: {
+        Args: {
+          p_blocks: Json
+          p_job_id: string
+          p_run_id: string
+          p_worker_id: string
+        }
+        Returns: undefined
+      }
       report_capture_failure: {
         Args: {
           p_capture_id: string
           p_failure_reason: string
           p_owner_user_id: string
+        }
+        Returns: Json
+      }
+      review_knowledge_item: {
+        Args: {
+          p_approved_citation_ids: string[]
+          p_decision: string
+          p_expected_version: number
+          p_knowledge_item_id: string
+          p_locked_fields: string[]
+          p_patch: Json
+          p_rejection_reason: string
         }
         Returns: Json
       }

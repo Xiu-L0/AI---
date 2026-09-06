@@ -70,7 +70,7 @@ pnpm supabase status
 
 ## 4. 配置本地环境变量
 
-Web 环境变量放在 `apps/web/.env.local`，扩展环境变量放在 `apps/extension/.env.local`。这些文件已被 Git 忽略，不得强制加入版本控制。
+Web 环境变量放在 `apps/web/.env.local`，扩展环境变量放在 `apps/extension/.env.local`，Worker 环境变量放在 `apps/worker/.env`。这些文件已被 Git 忽略，不得强制加入版本控制。知识处理 Worker 的启动、暂停、密钥轮换和队列观察见 `docs/runbooks/knowledge-worker-local.md`。
 
 Web 必需变量名称：
 
@@ -336,7 +336,7 @@ pnpm supabase stop
 
 ## 15. 下一步
 
-本地运行成功后，按照 `docs/runbooks/milestone-a-acceptance.md` 执行自动化门禁、Chrome/Edge 手工冒烟和后续用户协助的 30 次真实采集验收。历史累计指标继续按 16/23 记录；Stage 0 后的 30 次发布候选窗口单独计数。在发布候选窗口和失败样本复核完成前，不得宣布 Milestone A 的正式 90% 指标已经通过。Stage 0 不支持页面回执、finalize 中断恢复和补截图失败路径已有自动化证据，见验收文档第 11.3 节与失败样本复核。
+本地运行成功后，按照 `docs/runbooks/milestone-a-acceptance.md` 执行自动化门禁、Chrome/Edge 手工冒烟和后续用户协助的 30 次真实采集验收。知识提取与审核的本机流程见 `docs/runbooks/knowledge-worker-local.md`。历史累计指标继续按 16/23 记录；Stage 0 后的 30 次发布候选窗口单独计数。在发布候选窗口和失败样本复核完成前，不得宣布 Milestone A 的正式 90% 指标已经通过。Stage 0 不支持页面回执、finalize 中断恢复和补截图失败路径已有自动化证据，见验收文档第 11.3 节与失败样本复核。
 
 ## 16. Stage 1A 迁移门禁
 
@@ -352,4 +352,4 @@ pnpm supabase stop
 | Storage 对象数 | 48 |
 | 本机 E2E | 2026-09-06 全部 12 项通过。本地栈端口：API `55321`、DB `55322`、Studio `55323`、Mailpit `55324`、analytics `55327`。 |
 
-本表只记录时间戳、迁移版本、计数和校验结果，不写入原文、对象名、密钥或 signed URL。当前 `127.0.0.1:55322` 数据环境不是恢复目标。
+本表只记录时间戳、迁移版本、计数和校验结果，不写入原文、对象名、密钥或 signed URL。当前 `127.0.0.1:55322` 数据环境不是恢复目标。后续 Stage 1B 队列、持久化和审核迁移为 `202608110004_processing_queue`、`202608110005_persist_knowledge_extraction`、`202608110006_review_knowledge`；本机 Worker 操作见 `docs/runbooks/knowledge-worker-local.md`。禁止对已有真实数据的当前库执行 reset。
