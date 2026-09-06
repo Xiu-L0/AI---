@@ -2,8 +2,14 @@ import { createClient } from "@supabase/supabase-js";
 
 import { loadWorkerConfig } from "./config";
 import { createBuildSourceBlocksProcessor } from "./processors/build-source-blocks";
+import { createExtractKnowledgeProcessor } from "./processors/extract-knowledge";
 import { createNormalizeSourceProcessor } from "./processors/normalize-source";
+import { DeepSeekTextModel } from "./providers/deepseek-text-model";
 import { PostgresProcessingQueue } from "./queue/processing-queue";
+import {
+  PostgresKnowledgeRepository,
+  type KnowledgeQueryClient,
+} from "./repositories/knowledge-repository";
 import {
   PostgresSourceRepository,
   type SourceQueryClient,
@@ -29,6 +35,15 @@ async function main() {
     supabase as unknown as SourceQueryClient,
     config.workerId,
   );
+  const knowledge = new PostgresKnowledgeRepository(
+    supabase as unknown as KnowledgeQueryClient,
+    config.workerId,
+  );
+  const model = new DeepSeekTextModel({
+    apiKey: config.deepseekApiKey,
+    baseUrl: config.deepseekBaseUrl,
+    model: config.deepseekModel,
+  });
 
   try {
     await runWorkerLoop({
@@ -36,6 +51,12 @@ async function main() {
       processors: {
         normalize_source: createNormalizeSourceProcessor(sources),
         build_source_blocks: createBuildSourceBlocksProcessor(sources),
+        extract_knowledge: createExtractKnowledgeProcessor({
+          sources,
+          knowledge,
+          model,
+          modelName: config.deepseekModel,
+        }),
       },
       batchSize: config.batchSize,
       pollIntervalMs: config.pollIntervalMs,
