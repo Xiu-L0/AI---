@@ -119,3 +119,18 @@ limit 20;
 7. 拒绝另一条草稿会留下审计版本并离开收件箱；
 8. 重处理不覆盖已确认条目；
 9. 停止并重启 Worker 不会额外复制草稿。
+
+## 9. 第二私人账号隔离
+
+用一次性合成账号和合成采集内容做隔离验收。本步骤只写入这些一次性账号自己的行，不读取或改写现有用户原文。可重复执行：
+
+```powershell
+pnpm exec playwright test tests/e2e/web/knowledge-isolation.spec.ts
+```
+
+验收记录（2026-09-07）：
+
+- 第一个合成账号在 `/knowledge` 看到 1 条待审核草稿；第二个合成账号侧栏为 `知识审核 0`，收件箱为空，REST 查询 `knowledge_items`、`citations`、`source_blocks`、`processing_runs`、`review_tasks` 均为空。
+- 第二个账号只能列出自己的 `processing_jobs`；直接打开另一用户的审核页或采集详情返回 404。
+- 主导航和设置页没有共享空间入口；该账号可见的 `spaces.type` 只有 `private`。
+- 一次性账号在测试结束时删除。

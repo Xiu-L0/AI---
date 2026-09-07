@@ -26,7 +26,7 @@ export const supabaseUrl = readEnvironmentValue("NEXT_PUBLIC_SUPABASE_URL");
 export const publishableKey = readEnvironmentValue(
   "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
 );
-const serviceRoleKey = readEnvironmentValue("SUPABASE_SERVICE_ROLE_KEY");
+export const serviceRoleKey = readEnvironmentValue("SUPABASE_SERVICE_ROLE_KEY");
 
 export async function callAuthAdmin(path: string, init: RequestInit) {
   return fetch(`${supabaseUrl}/auth/v1/admin${path}`, {

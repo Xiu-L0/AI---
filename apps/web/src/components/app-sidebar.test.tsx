@@ -14,5 +14,6 @@ describe("AppSidebar", () => {
     expect(screen.getByRole("link", { name: "知识审核 3" })).toBeVisible();
     expect(screen.getByRole("link", { name: "异常 2" })).toBeVisible();
     expect(screen.getByRole("link", { name: "设置" })).toBeVisible();
+    expect(screen.queryByRole("link", { name: /共享/ })).toBeNull();
   });
 });
