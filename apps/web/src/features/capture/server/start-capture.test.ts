@@ -401,4 +401,98 @@ describe("startCaptureWithRepository", () => {
     );
     expect(repository.signedPaths).toEqual([]);
   });
+
+  it("reuses a typed Xiaohongshu start and conflicts on metadata changes", async () => {
+    const xhsStart = {
+      attachments: [] as Array<{
+        byteSize: number;
+        clientId: string;
+        fileName: string;
+        mimeType: "image/png";
+        sha256: string;
+      }>,
+      externalRef: "65abc123",
+      idempotencyKey: "11111111-1111-4111-8111-111111111111",
+      metadata: {
+        adapterName: "xiaohongshu" as const,
+        adapterVersion: "2026-09-08.v1",
+        assets: [
+          { alt: "cover", clientId: "img-1", ordinal: 0 },
+        ],
+        author: "合成作者",
+        capturedAt: "2026-09-08T01:00:00.000Z",
+        canonicalUrl: "https://www.xiaohongshu.com/explore/65abc123",
+      },
+      scope: "web_page" as const,
+      sensitivity: "normal" as const,
+      sourceKind: "social_post" as const,
+      sourcePlatform: "xiaohongshu" as const,
+      title: "合成小红书笔记",
+    };
+
+    const first = await startCaptureWithRepository(repository, {
+      createCaptureId: () => CAPTURE_ID,
+      input: xhsStart,
+      now: NOW,
+      ownerUserId: OWNER_ID,
+    });
+    const retry = await startCaptureWithRepository(repository, {
+      input: {
+        ...xhsStart,
+        metadata: {
+          ...xhsStart.metadata,
+          capturedAt: "2026-09-08T02:00:00.000Z",
+        },
+      },
+      now: new Date(NOW.getTime() + 60_000),
+      ownerUserId: OWNER_ID,
+    });
+
+    expect(retry.captureId).toBe(first.captureId);
+    expect(repository.createCount).toBe(1);
+    expect(
+      repository.sessions.get(`${OWNER_ID}:${xhsStart.idempotencyKey}`)
+        ?.input.sourcePlatform,
+    ).toBe("xiaohongshu");
+
+    await expect(
+      startCaptureWithRepository(repository, {
+        input: {
+          ...xhsStart,
+          metadata: {
+            ...xhsStart.metadata,
+            author: "另一个作者",
+          },
+        },
+        now: NOW,
+        ownerUserId: OWNER_ID,
+      }),
+    ).rejects.toMatchObject({ code: "idempotency_conflict" });
+  });
+
+  it("still accepts a legacy ChatGPT web start payload", async () => {
+    const result = await startCaptureWithRepository(repository, {
+      createCaptureId: () => CAPTURE_ID,
+      input: {
+        attachments: [],
+        externalRef: "conversation-1",
+        idempotencyKey: "chatgpt-legacy-start",
+        scope: "full_conversation",
+        sensitivity: "normal",
+        source: "chatgpt_web",
+        title: "合成对话",
+      },
+      now: NOW,
+      ownerUserId: OWNER_ID,
+    });
+
+    expect(result.captureId).toBe(CAPTURE_ID);
+    expect(
+      repository.sessions.get(`${OWNER_ID}:chatgpt-legacy-start`)?.input,
+    ).toMatchObject({
+      source: "chatgpt_web",
+      sourceKind: "ai_conversation",
+      sourcePlatform: "chatgpt",
+    });
+  });
 });

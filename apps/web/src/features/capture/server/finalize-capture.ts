@@ -2,10 +2,16 @@ import "server-only";
 
 import {
   AttachmentManifestSchema,
+  CaptureMetadataSchema,
   CaptureReceiptSchema,
+  resolveSourceIdentity,
   type AttachmentManifest,
+  type CaptureMetadata,
   type CaptureReceipt,
+  type CaptureSource,
   type FinalizeCaptureInput,
+  type SourceKind,
+  type SourcePlatform,
 } from "@recall/contracts";
 import { computeContentFingerprint } from "@recall/domain";
 import { z } from "zod";
@@ -47,7 +53,10 @@ export class CaptureExpiredError extends Error {
 export type PendingCaptureSession = {
   id: string;
   idempotencyKey: string;
-  source: "chatgpt_web" | "manual_text" | "manual_file" | "manual_screenshot";
+  source?: CaptureSource | null;
+  sourceKind?: SourceKind;
+  sourcePlatform?: SourcePlatform;
+  metadata?: CaptureMetadata;
   externalRef: string | null;
   status: "awaiting_upload" | "finalized" | "failed";
   expiresAt: string;
@@ -124,9 +133,17 @@ export async function finalizeCaptureWithRepository(
     throw new CaptureConflictError("Idempotency key does not match capture");
   }
 
+  const identity = resolveSourceIdentity({
+    source: session.source ?? undefined,
+    sourceKind: session.sourceKind,
+    sourcePlatform: session.sourcePlatform,
+  });
   const contentFingerprint = await computeContentFingerprint({
-    source: session.source,
+    sourceKind: identity.sourceKind,
+    sourcePlatform: identity.sourcePlatform,
+    ...(identity.source == null ? {} : { source: identity.source }),
     externalRef: session.externalRef,
+    metadata: session.metadata ?? null,
     rawText: args.input.rawText,
     messages: args.input.messages,
     attachmentHashes: session.expectedAttachments.map(
@@ -273,7 +290,7 @@ function createFinalizeCaptureRepository(): FinalizeCaptureRepository {
       const { data, error } = await admin
         .from("capture_sessions")
         .select(
-          "id, idempotency_key, source, external_ref, status, expires_at, expected_attachments",
+          "id, idempotency_key, source, source_kind, source_platform, metadata_json, external_ref, status, expires_at, expected_attachments",
         )
         .eq("id", captureId)
         .eq("owner_user_id", ownerUserId)
@@ -288,10 +305,21 @@ function createFinalizeCaptureRepository(): FinalizeCaptureRepository {
       const expectedAttachments = z
         .array(AttachmentManifestSchema)
         .parse(data.expected_attachments);
+      const metadataValue = data.metadata_json;
+      const metadata =
+        metadataValue == null ||
+        typeof metadataValue !== "object" ||
+        Array.isArray(metadataValue) ||
+        Object.keys(metadataValue).length === 0
+          ? undefined
+          : CaptureMetadataSchema.parse(metadataValue);
       return {
         id: data.id,
         idempotencyKey: data.idempotency_key,
         source: data.source,
+        sourceKind: data.source_kind,
+        sourcePlatform: data.source_platform,
+        ...(metadata == null ? {} : { metadata }),
         externalRef: data.external_ref,
         status: data.status,
         expiresAt: data.expires_at,

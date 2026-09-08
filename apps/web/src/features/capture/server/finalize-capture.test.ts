@@ -220,4 +220,35 @@ describe("finalizeCaptureWithRepository", () => {
     );
     expect(commitFinalization).not.toHaveBeenCalled();
   });
+
+  it("fingerprints Xiaohongshu finalization from typed session identity", async () => {
+    const repository = createRepository({
+      loadCaptureSession: vi.fn(async () => ({
+        ...session,
+        expectedAttachments: [],
+        externalRef: "65abc123",
+        metadata: {
+          adapterName: "xiaohongshu" as const,
+          adapterVersion: "2026-09-08.v1",
+          assets: [],
+          author: "合成作者",
+          capturedAt: "2026-09-08T01:00:00.000Z",
+          canonicalUrl: "https://www.xiaohongshu.com/explore/65abc123",
+        },
+        source: null,
+        sourceKind: "social_post" as const,
+        sourcePlatform: "xiaohongshu" as const,
+      })),
+    });
+
+    await finalizeCaptureWithRepository(repository, {
+      captureId,
+      input,
+      now: NOW,
+      ownerUserId,
+    });
+
+    const committed = vi.mocked(repository.commitFinalization).mock.calls[0]?.[0];
+    expect(committed?.contentFingerprint).toMatch(/^[a-f0-9]{64}$/);
+  });
 });

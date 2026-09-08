@@ -17,7 +17,7 @@ export type FailedCaptureSessionRecord = {
   createdAt: string;
   externalRef: string | null;
   failureReason: string;
-  source: CaptureSource;
+  source: CaptureSource | null;
   sourceItemId: string | null;
   title: string;
 };
@@ -48,7 +48,7 @@ export type PartialCaptureException = {
   recovery:
     | "extension_screenshot"
     | "independent_manual_screenshot";
-  source: CaptureSource;
+  source: CaptureSource | null;
   sourceItemId: string;
   title: string;
   version: number;
@@ -62,7 +62,7 @@ export type FailedCaptureException = {
   id: string;
   kind: "failed_capture";
   rawDataSafe: false;
-  source: CaptureSource;
+  source: CaptureSource | null;
   sourceItemId: string | null;
   title: string;
 };
@@ -73,7 +73,7 @@ export type FailedProcessingException = {
   id: string;
   kind: "processing_failed";
   rawDataSafe: true;
-  source: CaptureSource;
+  source: CaptureSource | null;
   sourceItemId: string;
   title: string;
   version: number;

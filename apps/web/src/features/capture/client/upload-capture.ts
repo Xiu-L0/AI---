@@ -4,12 +4,15 @@ import {
   FinalizeCaptureInputSchema,
   StartCaptureInputSchema,
   StartCaptureResultSchema,
+  type CaptureMetadata,
   type CaptureReceipt,
   type CaptureScope,
   type CaptureSource,
   type CapturedMessage,
   type FinalizableCompleteness,
   type Sensitivity,
+  type SourceKind,
+  type SourcePlatform,
   type StartCaptureResult,
 } from "@recall/contracts";
 import { z } from "zod";
@@ -26,11 +29,14 @@ export type BrowserCaptureDraft = {
   idempotencyKey?: string;
   recoveryCaptureId?: string;
   messages: readonly CapturedMessage[];
+  metadata?: CaptureMetadata;
   missingElements: readonly string[];
   rawText: string;
   scope: CaptureScope;
   sensitivity: Sensitivity;
-  source: CaptureSource;
+  source?: CaptureSource;
+  sourceKind?: SourceKind;
+  sourcePlatform?: SourcePlatform;
   title: string;
 };
 
@@ -261,7 +267,12 @@ export async function uploadCapture(
       : { recoveryCaptureId: draft.recoveryCaptureId }),
     scope: draft.scope,
     sensitivity: draft.sensitivity,
-    source: draft.source,
+    ...(draft.source === undefined ? {} : { source: draft.source }),
+    ...(draft.sourceKind === undefined ? {} : { sourceKind: draft.sourceKind }),
+    ...(draft.sourcePlatform === undefined
+      ? {}
+      : { sourcePlatform: draft.sourcePlatform }),
+    ...(draft.metadata === undefined ? {} : { metadata: draft.metadata }),
     title: draft.title,
   });
   let startResult: StartCaptureResult;

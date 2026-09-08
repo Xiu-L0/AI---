@@ -1,6 +1,8 @@
 import {
   AttachmentManifestSchema,
+  CaptureMetadataSchema,
   StartCaptureInputSchema,
+  resolveSourceIdentity,
   type AttachmentManifest,
   type StartCaptureInput,
   type StartCaptureResult,
@@ -132,7 +134,19 @@ export function buildCaptureStoragePath(
   ].join("/");
 }
 
+function normalizeStartInput(input: StartCaptureInput): StartCaptureInput {
+  const identity = resolveSourceIdentity(input);
+  return {
+    ...input,
+    ...(identity.source == null ? {} : { source: identity.source }),
+    sourceKind: identity.sourceKind,
+    sourcePlatform: identity.sourcePlatform,
+  };
+}
+
 function comparableCaptureInput(input: StartCaptureInput) {
+  const identity = resolveSourceIdentity(input);
+  const metadata = input.metadata;
   return {
     attachments: [...input.attachments]
       .sort((left, right) => left.clientId.localeCompare(right.clientId))
@@ -144,10 +158,30 @@ function comparableCaptureInput(input: StartCaptureInput) {
         sha256: attachment.sha256,
       })),
     externalRef: input.externalRef,
+    metadata: metadata
+      ? {
+          adapterName: metadata.adapterName,
+          adapterVersion: metadata.adapterVersion,
+          assets: [...metadata.assets]
+            .sort(
+              (left, right) =>
+                left.ordinal - right.ordinal ||
+                left.clientId.localeCompare(right.clientId),
+            )
+            .map((asset) => ({
+              alt: asset.alt,
+              clientId: asset.clientId,
+              ordinal: asset.ordinal,
+            })),
+          author: metadata.author,
+          canonicalUrl: metadata.canonicalUrl,
+        }
+      : null,
     recoveryCaptureId: input.recoveryCaptureId ?? null,
     scope: input.scope,
     sensitivity: input.sensitivity,
-    source: input.source,
+    sourceKind: identity.sourceKind,
+    sourcePlatform: identity.sourcePlatform,
     title: input.title,
   };
 }
@@ -314,9 +348,17 @@ async function requireValidRecoveryTarget(
     input.recoveryCaptureId,
   );
   const sameSource =
-    target?.input.source === input.source &&
-    target.input.scope === input.scope &&
-    target.input.externalRef === input.externalRef;
+    target !== null &&
+    (() => {
+      const existing = resolveSourceIdentity(target.input);
+      const incoming = resolveSourceIdentity(input);
+      return (
+        existing.sourceKind === incoming.sourceKind &&
+        existing.sourcePlatform === incoming.sourcePlatform &&
+        target.input.scope === input.scope &&
+        target.input.externalRef === input.externalRef
+      );
+    })();
   if (
     target === null ||
     target.status === "finalized" ||
@@ -340,7 +382,7 @@ export async function startCaptureWithRepository(
 
   try {
     ownerUserId = OwnerUserIdSchema.parse(args.ownerUserId);
-    input = StartCaptureInputSchema.parse(args.input);
+    input = normalizeStartInput(StartCaptureInputSchema.parse(args.input));
   } catch (error) {
     if (error instanceof ZodError) {
       throw new CaptureStartError(
@@ -392,6 +434,18 @@ export async function startCaptureWithRepository(
   });
 }
 
+function parseStoredMetadata(value: Json): StartCaptureInput["metadata"] {
+  if (
+    value == null ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.keys(value).length === 0
+  ) {
+    return undefined;
+  }
+  return CaptureMetadataSchema.parse(value);
+}
+
 function parseCaptureSession(
   row: {
     expected_attachments: Json;
@@ -400,15 +454,19 @@ function parseCaptureSession(
     external_ref: string | null;
     id: string;
     idempotency_key: string;
+    metadata_json: Json;
     recovery_of_capture_session_id: string | null;
     resolved_at: string | null;
     scope: StartCaptureInput["scope"];
     sensitivity: StartCaptureInput["sensitivity"];
-    source: StartCaptureInput["source"];
+    source: StartCaptureInput["source"] | null;
+    source_kind: NonNullable<StartCaptureInput["sourceKind"]>;
+    source_platform: NonNullable<StartCaptureInput["sourcePlatform"]>;
     status: CaptureStartSession["status"];
     title: string;
   },
 ): CaptureStartSession {
+  const metadata = parseStoredMetadata(row.metadata_json);
   return {
     expiresAt: row.expires_at,
     failureReason: row.failure_reason,
@@ -419,10 +477,15 @@ function parseCaptureSession(
       ),
       externalRef: row.external_ref,
       idempotencyKey: row.idempotency_key,
-      recoveryCaptureId: row.recovery_of_capture_session_id,
+      ...(row.recovery_of_capture_session_id == null
+        ? {}
+        : { recoveryCaptureId: row.recovery_of_capture_session_id }),
       scope: row.scope,
       sensitivity: row.sensitivity,
-      source: row.source,
+      ...(row.source == null ? {} : { source: row.source }),
+      sourceKind: row.source_kind,
+      sourcePlatform: row.source_platform,
+      ...(metadata == null ? {} : { metadata }),
       title: row.title,
     }),
     resolvedAt: row.resolved_at,
@@ -434,7 +497,7 @@ async function createCaptureStartRepository(): Promise<CaptureStartRepository> {
   const { createAdminClient } = await import("@/lib/supabase/admin");
   const admin = createAdminClient();
   const selection =
-    "id, idempotency_key, source, scope, title, sensitivity, external_ref, expected_attachments, status, failure_reason, expires_at, recovery_of_capture_session_id, resolved_at";
+    "id, idempotency_key, source, source_kind, source_platform, metadata_json, scope, title, sensitivity, external_ref, expected_attachments, status, failure_reason, expires_at, recovery_of_capture_session_id, resolved_at";
 
   const findCaptureSession: CaptureStartRepository["findCaptureSession"] =
     async (ownerUserId, idempotencyKey) => {
@@ -484,11 +547,14 @@ async function createCaptureStartRepository(): Promise<CaptureStartRepository> {
           external_ref: capture.externalRef,
           id: captureId,
           idempotency_key: capture.idempotencyKey,
+          metadata_json: (capture.metadata ?? {}) as Json,
           owner_user_id: ownerUserId,
           recovery_of_capture_session_id: capture.recoveryCaptureId ?? null,
           scope: capture.scope,
           sensitivity: capture.sensitivity,
-          source: capture.source,
+          source: capture.source ?? null,
+          source_kind: capture.sourceKind!,
+          source_platform: capture.sourcePlatform!,
           status: "awaiting_upload",
           title: capture.title,
         })

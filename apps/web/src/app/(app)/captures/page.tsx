@@ -6,12 +6,19 @@ import {
 } from "@/features/capture/server/list-captures";
 import { requireUser } from "@/lib/supabase/server";
 
-const sourceLabels: Record<CaptureHistoryItem["source"], string> = {
+const sourceLabels: Record<
+  NonNullable<CaptureHistoryItem["source"]>,
+  string
+> = {
   chatgpt_web: "ChatGPT 会话",
   manual_file: "文件",
   manual_screenshot: "截图",
   manual_text: "文本",
 };
+
+function formatSource(source: CaptureHistoryItem["source"]) {
+  return source == null ? "网页笔记" : sourceLabels[source];
+}
 
 const processingLabels: Record<CaptureHistoryItem["processingStatus"], string> = {
   complete: "处理完成",
@@ -75,7 +82,7 @@ export default async function CapturesPage({
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2 text-xs font-medium">
                     <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
-                      {sourceLabels[capture.source]}
+                      {formatSource(capture.source)}
                     </span>
                     <span
                       className={

@@ -106,6 +106,58 @@ describe("uploadCapture", () => {
     expect(uploadToSignedUrl).toHaveBeenCalledOnce();
   });
 
+  it("starts a typed Xiaohongshu capture without a legacy source", async () => {
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({ captureId: CAPTURE_ID, uploadTargets: [] }, 201),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ ...receiptResponse(), savedAttachmentCount: 0 }),
+      );
+
+    await uploadCapture(
+      {
+        attachments: [],
+        completeness: "complete",
+        externalRef: "65abc123",
+        messages: [],
+        missingElements: [],
+        rawText: "合成正文",
+        scope: "web_page",
+        sensitivity: "normal",
+        sourceKind: "social_post",
+        sourcePlatform: "xiaohongshu",
+        title: "合成小红书笔记",
+        metadata: {
+          adapterName: "xiaohongshu",
+          adapterVersion: "2026-09-08.v1",
+          assets: [],
+          author: "合成作者",
+          capturedAt: "2026-09-08T01:00:00.000Z",
+          canonicalUrl: "https://www.xiaohongshu.com/explore/65abc123",
+        },
+      },
+      {
+        createIdempotencyKey: () => IDEMPOTENCY_KEY,
+        fetch: fetchImplementation,
+        hashFile,
+        uploadToSignedUrl,
+      },
+    );
+
+    const startBody = JSON.parse(
+      String(fetchImplementation.mock.calls[0]?.[1]?.body),
+    ) as {
+      source?: string;
+      sourceKind?: string;
+      sourcePlatform?: string;
+    };
+    expect(startBody.sourceKind).toBe("social_post");
+    expect(startBody.sourcePlatform).toBe("xiaohongshu");
+    expect(startBody.source).toBeUndefined();
+  });
+
   it("sends an explicit failed-session recovery link only in the start request", async () => {
     const recoveryCaptureId =
       "20000000-0000-4000-8000-000000000099";

@@ -28,7 +28,7 @@ export type CaptureSourceRecord = {
   currentVersion: number;
   id: string;
   sensitivity: Sensitivity;
-  source: CaptureSource;
+  source: CaptureSource | null;
   title: string;
   updatedAt: string;
 };
@@ -111,7 +111,7 @@ export type CaptureHistoryItem = {
   savedAttachmentCount: number;
   savedMessageCount: number;
   sensitivity: Sensitivity;
-  source: CaptureSource;
+  source: CaptureSource | null;
   sourceItemId: string;
   sourceVersionId: string;
   title: string;
@@ -334,7 +334,7 @@ function mapSourceRow(row: {
   current_version: number;
   id: string;
   sensitivity: Sensitivity;
-  source: CaptureSource;
+  source: CaptureSource | null;
   title: string;
   updated_at: string;
 }): CaptureSourceRecord {
