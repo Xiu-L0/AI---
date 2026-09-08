@@ -621,13 +621,15 @@ export function App({ services = defaultServices }: { services?: PopupServices }
               <li key={item}>{item}</li>
             ))}
           </ul>
-          <button
-            disabled={operation !== "idle"}
-            type="button"
-            onClick={() => void addScreenshotRecovery()}
-          >
-            {operation === "screenshot" ? "正在补充…" : "补充截图"}
-          </button>
+          {!isXiaohongshuResult && (
+            <button
+              disabled={operation !== "idle"}
+              type="button"
+              onClick={() => void addScreenshotRecovery()}
+            >
+              {operation === "screenshot" ? "正在补充…" : "补充截图"}
+            </button>
+          )}
         </section>
       )}
 

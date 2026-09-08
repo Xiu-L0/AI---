@@ -225,6 +225,10 @@ test("Xiaohongshu capture stays honest across complete, partial, restart, duplic
     const missingCopy = await popup.locator("section ul li").allTextContents();
     const fileNames = attachments.map((attachment) => attachment.file_name);
     expect(fileNames.some((name) => name === "xhs-image-1.png")).toBe(true);
+    // Playwright opens popup.html by URL, which does not grant activeTab the way a
+    // real toolbar click does. This allows an honest screenshot-permission failure
+    // and is not proof that a toolbar-triggered visible-tab PNG was saved. Task 12
+    // must verify that path on a real Chrome/Edge toolbar click.
     expect(
       fileNames.some((name) => name.startsWith("xhs-fallback-")) ||
         missingCopy.some((item) => item.includes("页面截图未能作为补充证据保存")),

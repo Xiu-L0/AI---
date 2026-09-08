@@ -639,6 +639,7 @@ describe("extension popup", () => {
     ).toBeVisible();
     expect(screen.getByText("第 2 张图片无法读取：HTTP 403")).toBeVisible();
     expect(screen.queryByText("完整采集成功")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "补充截图" })).not.toBeInTheDocument();
   });
 
   it("does not stay loading when extension state cannot be read", async () => {

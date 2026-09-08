@@ -288,10 +288,9 @@ export function extractCurrentXiaohongshuPage(
     ),
   ];
   const images = mergeImages(uniqueDeclared, visibleArticleImages(article));
-  const hasVideo =
-    article?.querySelector("video, [aria-label*='视频']") !== null ||
-    document.querySelector("article video, article [aria-label*='视频']") !==
-      null;
+  const hasVideo = Boolean(
+    article?.querySelector("video, [aria-label*='视频']"),
+  );
 
   return {
     author,

@@ -20,6 +20,7 @@ import {
 import type { AttachmentStore } from "./attachment-store";
 import { testFixtureOrigin } from "./chatgpt/origins";
 import type { OutboxItem, StoredAttachment } from "./outbox-types";
+import { isAllowedXiaohongshuImageUrl } from "./xiaohongshu/origins";
 import {
   StorageUploadError,
   uploadToSignedTarget,
@@ -254,6 +255,16 @@ function safeRemoteImageUrl(
   return url;
 }
 
+function assertXiaohongshuImageUrl(
+  value: string,
+  blockedOrigins: ReadonlySet<string>,
+): URL {
+  if (!isAllowedXiaohongshuImageUrl(value)) {
+    throw new Error("图片来源不在允许的安全边界内");
+  }
+  return safeRemoteImageUrl(value, blockedOrigins);
+}
+
 function dataUrlPngBlob(value: string): Blob {
   if (!value.startsWith("data:image/png")) {
     throw new Error("浏览器截图没有返回 image/png 数据");
@@ -440,7 +451,10 @@ async function prepareAttachments(
   let hadNonRetryableImageFailure = false;
   for (const image of pending) {
     try {
-      const sourceUrl = safeRemoteImageUrl(image.sourceUrl, blockedOrigins);
+      const sourceUrl =
+        item.draft.sourcePlatform === "xiaohongshu"
+          ? assertXiaohongshuImageUrl(image.sourceUrl, blockedOrigins)
+          : safeRemoteImageUrl(image.sourceUrl, blockedOrigins);
       let response: Response;
       try {
         response = await fetcher(sourceUrl, {
@@ -451,7 +465,10 @@ async function prepareAttachments(
         throw new RetryableImageFetchError("图片下载暂时失败");
       }
       const finalUrlValue = response.url.length > 0 ? response.url : sourceUrl.href;
-      const finalUrl = safeRemoteImageUrl(finalUrlValue, blockedOrigins);
+      const finalUrl =
+        item.draft.sourcePlatform === "xiaohongshu"
+          ? assertXiaohongshuImageUrl(finalUrlValue, blockedOrigins)
+          : safeRemoteImageUrl(finalUrlValue, blockedOrigins);
       if (
         finalUrl.protocol !== "https:" &&
         finalUrl.protocol !== "data:" &&

@@ -46,18 +46,32 @@ describe("Xiaohongshu origins", () => {
   it("allows HTTPS CDN images and test-fixture loopback images only", () => {
     expect(
       isAllowedXiaohongshuImageUrl(
-        "https://sns-webpic-qc.xhscdn.com/fixture/cover.png",
+        "https://sns-webpic-qc.xhscdn.com/a.png",
       ),
     ).toBe(true);
     expect(
-      isAllowedXiaohongshuImageUrl("http://127.0.0.1:41739/xhs/cover.png"),
+      isAllowedXiaohongshuImageUrl("https://xhscdn.com.attacker.example/a.png"),
+    ).toBe(false);
+    expect(
+      isAllowedXiaohongshuImageUrl("https://images.example.test/a.png"),
+    ).toBe(false);
+    expect(isAllowedXiaohongshuImageUrl("https://xhscdn.com/a.png")).toBe(false);
+    expect(
+      isAllowedXiaohongshuImageUrl("http://127.0.0.1:41739/a.png"),
     ).toBe(false);
     expect(
       isAllowedXiaohongshuImageUrl(
-        "http://127.0.0.1:41739/xhs/cover.png",
+        "http://127.0.0.1:41739/a.png",
         "http://127.0.0.1:41739",
         true,
       ),
     ).toBe(true);
+    expect(
+      isAllowedXiaohongshuImageUrl(
+        "http://127.0.0.1:9999/a.png",
+        "http://127.0.0.1:41739",
+        true,
+      ),
+    ).toBe(false);
   });
 });

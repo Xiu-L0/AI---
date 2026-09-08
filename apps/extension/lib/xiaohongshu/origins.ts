@@ -20,6 +20,11 @@ function decodeNoteId(raw: string): string | null {
   }
 }
 
+function isXiaohongshuCdnHostname(hostname: string): boolean {
+  const host = hostname.trim().toLowerCase().replace(/\.$/, "");
+  return host.endsWith(".xhscdn.com") && host !== "xhscdn.com";
+}
+
 export function xiaohongshuMatchPatterns(
   configured = import.meta.env.WXT_TEST_FIXTURE_ORIGIN,
   testBuild = import.meta.env.WXT_TEST_BUILD === "1",
@@ -72,7 +77,10 @@ export function isAllowedXiaohongshuImageUrl(
   if (/^data:image\//i.test(trimmed)) return true;
   try {
     const url = new URL(trimmed);
-    if (url.protocol === "https:") return true;
+    if (url.username || url.password) return false;
+    if (url.protocol === "https:" && isXiaohongshuCdnHostname(url.hostname)) {
+      return true;
+    }
     const fixtureOrigin = testFixtureOrigin(configured, testBuild);
     return fixtureOrigin !== null && url.origin === fixtureOrigin;
   } catch {

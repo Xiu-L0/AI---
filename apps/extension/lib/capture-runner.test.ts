@@ -174,6 +174,36 @@ function pendingImageItem(sourceUrl = "https://images.example.test/image.png") {
   });
 }
 
+function xiaohongshuPendingItem(sourceUrl: string) {
+  const { source: _legacySource, ...baseDraft } = item().draft;
+  return item({
+    attachmentsPrepared: false,
+    draft: {
+      ...baseDraft,
+      completeness: "complete",
+      externalRef: "65abc123",
+      messages: [],
+      originConversationRef: "65abc123",
+      originUrl: "https://www.xiaohongshu.com/explore/65abc123",
+      pendingImages: [
+        {
+          alt: "cover",
+          clientId: "xhs-image-1",
+          fileName: "xhs-image-1.png",
+          missingLabel: "第 1 张图片无法读取",
+          ordinal: 0,
+          sourceUrl,
+        },
+      ],
+      rawText: "合成正文",
+      scope: "web_page",
+      sourceKind: "social_post",
+      sourcePlatform: "xiaohongshu",
+      title: "合成标题",
+    },
+  });
+}
+
 function syntheticPngBlob() {
   return new Blob(
     [syntheticPngBytes()],
@@ -595,6 +625,75 @@ describe("capture runner", () => {
         sourcePlatform: "xiaohongshu",
       }),
     );
+  });
+
+  it("does not fetch a Xiaohongshu image from an unpermitted HTTPS host", async () => {
+    const sourceUrl = "https://images.example.test/a.png";
+    const fetcher = vi.fn();
+    const api: CaptureApiClient = {
+      finalize: vi.fn(async (_captureId, input) =>
+        receipt("partial", input.missingElements),
+      ),
+      reportFailure: vi.fn(async () => failureReport()),
+      start: vi.fn(async () => startResult()),
+      status: vi.fn(),
+    };
+    const runner = createCaptureRunner({
+      attachmentStore: {
+        getAttachment: vi.fn(async () => null),
+        putAttachment: vi.fn(async () => undefined),
+      },
+      fetch: fetcher,
+      getApiClient: async () => api,
+      outbox: fakeOutbox(xiaohongshuPendingItem(sourceUrl)).port,
+    });
+
+    const result = await runner.processOutboxItem("outbox-1", now);
+
+    expect(result.state).toBe("partial");
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(result.receipt?.missingElements.join(" ")).toContain("第 1 张图片无法读取");
+    expect(result.receipt?.missingElements.join(" ")).not.toContain(sourceUrl);
+  });
+
+  it("does not read a Xiaohongshu image redirected off the CDN", async () => {
+    const sourceUrl = "https://sns-webpic-qc.xhscdn.com/a.png";
+    const redirected = "https://images.example.test/stolen.png";
+    const blob = vi.fn(async () => syntheticPngBlob());
+    const fetcher = vi.fn(async () =>
+      ({
+        blob,
+        ok: true,
+        status: 200,
+        url: redirected,
+      }) as unknown as Response,
+    );
+    const api: CaptureApiClient = {
+      finalize: vi.fn(async (_captureId, input) =>
+        receipt("partial", input.missingElements),
+      ),
+      reportFailure: vi.fn(async () => failureReport()),
+      start: vi.fn(async () => startResult()),
+      status: vi.fn(),
+    };
+    const runner = createCaptureRunner({
+      attachmentStore: {
+        getAttachment: vi.fn(async () => null),
+        putAttachment: vi.fn(async () => undefined),
+      },
+      fetch: fetcher,
+      getApiClient: async () => api,
+      outbox: fakeOutbox(xiaohongshuPendingItem(sourceUrl)).port,
+    });
+
+    const result = await runner.processOutboxItem("outbox-1", now);
+
+    expect(result.state).toBe("partial");
+    expect(fetcher).toHaveBeenCalled();
+    expect(blob).not.toHaveBeenCalled();
+    expect(result.receipt?.missingElements.join(" ")).toContain("第 1 张图片无法读取");
+    expect(result.receipt?.missingElements.join(" ")).not.toContain(sourceUrl);
+    expect(result.receipt?.missingElements.join(" ")).not.toContain(redirected);
   });
 
   it.each([429, 500, 503])(
