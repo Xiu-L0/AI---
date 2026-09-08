@@ -7,31 +7,6 @@ export type Json =
   | Json[]
 
 export type Database = {
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       capture_sessions: {
@@ -44,6 +19,7 @@ export type Database = {
           finalized_at: string | null
           id: string
           idempotency_key: string
+          metadata_json: Json
           owner_user_id: string
           recovery_of_capture_session_id: string | null
           resolved_at: string | null
@@ -51,8 +27,10 @@ export type Database = {
           result_source_version_id: string | null
           scope: Database["public"]["Enums"]["capture_scope"]
           sensitivity: Database["public"]["Enums"]["sensitivity_level"]
-          source: Database["public"]["Enums"]["capture_source"]
+          source: Database["public"]["Enums"]["capture_source"] | null
           source_item_id: string | null
+          source_kind: Database["public"]["Enums"]["source_kind"]
+          source_platform: Database["public"]["Enums"]["source_platform"]
           status: Database["public"]["Enums"]["capture_session_state"]
           title: string
         }
@@ -65,6 +43,7 @@ export type Database = {
           finalized_at?: string | null
           id?: string
           idempotency_key: string
+          metadata_json?: Json
           owner_user_id: string
           recovery_of_capture_session_id?: string | null
           resolved_at?: string | null
@@ -72,8 +51,10 @@ export type Database = {
           result_source_version_id?: string | null
           scope: Database["public"]["Enums"]["capture_scope"]
           sensitivity: Database["public"]["Enums"]["sensitivity_level"]
-          source: Database["public"]["Enums"]["capture_source"]
+          source?: Database["public"]["Enums"]["capture_source"] | null
           source_item_id?: string | null
+          source_kind: Database["public"]["Enums"]["source_kind"]
+          source_platform: Database["public"]["Enums"]["source_platform"]
           status?: Database["public"]["Enums"]["capture_session_state"]
           title: string
         }
@@ -86,6 +67,7 @@ export type Database = {
           finalized_at?: string | null
           id?: string
           idempotency_key?: string
+          metadata_json?: Json
           owner_user_id?: string
           recovery_of_capture_session_id?: string | null
           resolved_at?: string | null
@@ -93,8 +75,10 @@ export type Database = {
           result_source_version_id?: string | null
           scope?: Database["public"]["Enums"]["capture_scope"]
           sensitivity?: Database["public"]["Enums"]["sensitivity_level"]
-          source?: Database["public"]["Enums"]["capture_source"]
+          source?: Database["public"]["Enums"]["capture_source"] | null
           source_item_id?: string | null
+          source_kind?: Database["public"]["Enums"]["source_kind"]
+          source_platform?: Database["public"]["Enums"]["source_platform"]
           status?: Database["public"]["Enums"]["capture_session_state"]
           title?: string
         }
@@ -819,7 +803,9 @@ export type Database = {
           id: string
           owner_user_id: string
           sensitivity: Database["public"]["Enums"]["sensitivity_level"]
-          source: Database["public"]["Enums"]["capture_source"]
+          source: Database["public"]["Enums"]["capture_source"] | null
+          source_kind: Database["public"]["Enums"]["source_kind"]
+          source_platform: Database["public"]["Enums"]["source_platform"]
           space_id: string
           title: string
           updated_at: string
@@ -833,7 +819,9 @@ export type Database = {
           id?: string
           owner_user_id: string
           sensitivity: Database["public"]["Enums"]["sensitivity_level"]
-          source: Database["public"]["Enums"]["capture_source"]
+          source?: Database["public"]["Enums"]["capture_source"] | null
+          source_kind: Database["public"]["Enums"]["source_kind"]
+          source_platform: Database["public"]["Enums"]["source_platform"]
           space_id: string
           title: string
           updated_at?: string
@@ -847,7 +835,9 @@ export type Database = {
           id?: string
           owner_user_id?: string
           sensitivity?: Database["public"]["Enums"]["sensitivity_level"]
-          source?: Database["public"]["Enums"]["capture_source"]
+          source?: Database["public"]["Enums"]["capture_source"] | null
+          source_kind?: Database["public"]["Enums"]["source_kind"]
+          source_platform?: Database["public"]["Enums"]["source_platform"]
           space_id?: string
           title?: string
           updated_at?: string
@@ -910,6 +900,7 @@ export type Database = {
           content_fingerprint: string
           created_at: string
           id: string
+          metadata_json: Json
           missing_elements: string[]
           owner_user_id: string
           raw_text: string
@@ -922,6 +913,7 @@ export type Database = {
           content_fingerprint: string
           created_at?: string
           id?: string
+          metadata_json?: Json
           missing_elements?: string[]
           owner_user_id: string
           raw_text: string
@@ -934,6 +926,7 @@ export type Database = {
           content_fingerprint?: string
           created_at?: string
           id?: string
+          metadata_json?: Json
           missing_elements?: string[]
           owner_user_id?: string
           raw_text?: string
@@ -1267,6 +1260,23 @@ export type Database = {
         | "repository_file"
         | "repository_excerpt"
         | "metadata"
+      source_kind:
+        | "ai_conversation"
+        | "web_article"
+        | "social_post"
+        | "code_repository"
+        | "manual_text"
+        | "manual_file"
+        | "screenshot"
+      source_platform:
+        | "chatgpt"
+        | "doubao"
+        | "deepseek"
+        | "wechat"
+        | "xiaohongshu"
+        | "github"
+        | "generic_web"
+        | "manual"
       space_member_role: "owner" | "editor" | "viewer"
       space_type: "private" | "shared"
     }
@@ -1394,9 +1404,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       capture_completeness: ["complete", "partial", "failed"],
@@ -1472,8 +1479,28 @@ export const Constants = {
         "repository_excerpt",
         "metadata",
       ],
+      source_kind: [
+        "ai_conversation",
+        "web_article",
+        "social_post",
+        "code_repository",
+        "manual_text",
+        "manual_file",
+        "screenshot",
+      ],
+      source_platform: [
+        "chatgpt",
+        "doubao",
+        "deepseek",
+        "wechat",
+        "xiaohongshu",
+        "github",
+        "generic_web",
+        "manual",
+      ],
       space_member_role: ["owner", "editor", "viewer"],
       space_type: ["private", "shared"],
     },
   },
 } as const
+
