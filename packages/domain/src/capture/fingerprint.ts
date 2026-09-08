@@ -1,8 +1,26 @@
-import type { CapturedMessage, CaptureSource } from "@recall/contracts";
+import {
+  resolveSourceIdentity,
+  type CapturedMessage,
+  type CaptureSource,
+  type SourceKind,
+  type SourcePlatform
+} from "@recall/contracts";
 
 export interface FingerprintInput {
-  source: CaptureSource;
+  source?: CaptureSource;
+  sourceKind?: SourceKind;
+  sourcePlatform?: SourcePlatform;
   externalRef: string | null;
+  metadata?: {
+    author?: string | null;
+    canonicalUrl?: string | null;
+    capturedAt?: string;
+    assets?: ReadonlyArray<{
+      clientId: string;
+      ordinal: number;
+      alt?: string;
+    }>;
+  } | null;
   rawText: string;
   messages: readonly CapturedMessage[];
   attachmentHashes: readonly string[];
@@ -21,22 +39,34 @@ function bytesToHex(bytes: Uint8Array): string {
 export async function computeContentFingerprint(
   input: FingerprintInput
 ): Promise<string> {
+  const identity = resolveSourceIdentity(input);
+  const canonicalMessages = [...input.messages]
+    .sort(
+      (left, right) =>
+        left.ordinal - right.ordinal ||
+        left.externalMessageId.localeCompare(right.externalMessageId)
+    )
+    .map((message) => ({
+      externalMessageId: message.externalMessageId,
+      role: message.role,
+      text: normalizeText(message.text),
+      ordinal: message.ordinal
+    }));
   const canonicalValue = {
-    source: input.source,
+    sourceKind: identity.sourceKind,
+    sourcePlatform: identity.sourcePlatform,
     externalRef: input.externalRef,
-    rawText: normalizeText(input.rawText),
-    messages: [...input.messages]
-      .sort(
+    metadata: {
+      author: input.metadata?.author ?? null,
+      canonicalUrl: input.metadata?.canonicalUrl ?? null,
+      assets: [...(input.metadata?.assets ?? [])].sort(
         (left, right) =>
           left.ordinal - right.ordinal ||
-          left.externalMessageId.localeCompare(right.externalMessageId)
+          left.clientId.localeCompare(right.clientId)
       )
-      .map((message) => ({
-        externalMessageId: message.externalMessageId,
-        role: message.role,
-        text: normalizeText(message.text),
-        ordinal: message.ordinal
-      })),
+    },
+    rawText: normalizeText(input.rawText),
+    messages: canonicalMessages,
     attachmentHashes: [...input.attachmentHashes].sort()
   };
   const bytes = new TextEncoder().encode(JSON.stringify(canonicalValue));

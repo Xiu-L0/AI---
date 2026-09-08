@@ -4,8 +4,10 @@ import {
   FinalizeCaptureInputSchema,
   ReportCaptureFailureInputSchema,
   ReportCaptureFailureResultSchema,
+  SourcePlatformSchema,
   StartCaptureInputSchema,
-  StartCaptureResultSchema
+  StartCaptureResultSchema,
+  resolveSourceIdentity
 } from "./capture";
 
 const MIB = 1024 * 1024;
@@ -317,6 +319,98 @@ describe("capture contracts", () => {
     });
 
     expect(result.success).toBe(false);
+  });
+
+  it("rejects Claude as a capture platform", () => {
+    expect(SourcePlatformSchema.safeParse("claude").success).toBe(false);
+  });
+
+  it("accepts Xiaohongshu only as a social post web page", () => {
+    expect(
+      StartCaptureInputSchema.parse({
+        idempotencyKey: "xhs-note-123456",
+        sourceKind: "social_post",
+        sourcePlatform: "xiaohongshu",
+        scope: "web_page",
+        title: "合成笔记",
+        sensitivity: "normal",
+        externalRef: "note-123",
+        attachments: [],
+      }).sourcePlatform,
+    ).toBe("xiaohongshu");
+    expect(() =>
+      StartCaptureInputSchema.parse({
+        idempotencyKey: "xhs-note-123456",
+        sourceKind: "social_post",
+        sourcePlatform: "xiaohongshu",
+        scope: "full_conversation",
+        title: "合成笔记",
+        sensitivity: "normal",
+        externalRef: "note-123",
+        attachments: [],
+      }),
+    ).toThrow();
+  });
+
+  it("maps legacy ChatGPT payloads to typed identity", () => {
+    const parsed = StartCaptureInputSchema.parse({
+      idempotencyKey: "chatgpt-legacy-1",
+      source: "chatgpt_web",
+      scope: "full_conversation",
+      title: "合成对话",
+      sensitivity: "normal",
+      externalRef: "conversation-1",
+      attachments: [],
+    });
+
+    expect(resolveSourceIdentity(parsed)).toEqual({
+      source: "chatgpt_web",
+      sourceKind: "ai_conversation",
+      sourcePlatform: "chatgpt",
+    });
+  });
+
+  it("rejects mismatched legacy and typed identity", () => {
+    expect(
+      StartCaptureInputSchema.safeParse({
+        idempotencyKey: "chatgpt-mismatch-1",
+        source: "chatgpt_web",
+        sourceKind: "social_post",
+        sourcePlatform: "xiaohongshu",
+        scope: "web_page",
+        title: "合成笔记",
+        sensitivity: "normal",
+        externalRef: "note-123",
+        attachments: [],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires an external ref for ChatGPT and Xiaohongshu", () => {
+    expect(
+      StartCaptureInputSchema.safeParse({
+        idempotencyKey: "chatgpt-missing-ref",
+        sourceKind: "ai_conversation",
+        sourcePlatform: "chatgpt",
+        scope: "full_conversation",
+        title: "合成对话",
+        sensitivity: "normal",
+        externalRef: "   ",
+        attachments: [],
+      }).success,
+    ).toBe(false);
+    expect(
+      StartCaptureInputSchema.safeParse({
+        idempotencyKey: "xhs-missing-ref",
+        sourceKind: "social_post",
+        sourcePlatform: "xiaohongshu",
+        scope: "web_page",
+        title: "合成笔记",
+        sensitivity: "normal",
+        externalRef: null,
+        attachments: [],
+      }).success,
+    ).toBe(false);
   });
 
   it("keeps complete receipt missing elements empty", () => {

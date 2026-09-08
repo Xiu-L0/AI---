@@ -92,4 +92,71 @@ describe("computeContentFingerprint", () => {
 
     expect(first).not.toBe(second);
   });
+
+  it("maps legacy ChatGPT identity to the typed fingerprint", async () => {
+    const messages = [
+      {
+        externalMessageId: "m1",
+        role: "user" as const,
+        text: "same question",
+        ordinal: 0
+      }
+    ];
+    const legacy = await computeContentFingerprint({
+      source: "chatgpt_web",
+      externalRef: "conversation-1",
+      rawText: "same",
+      messages,
+      attachmentHashes: []
+    });
+    const typed = await computeContentFingerprint({
+      sourceKind: "ai_conversation",
+      sourcePlatform: "chatgpt",
+      externalRef: "conversation-1",
+      rawText: "same",
+      messages,
+      attachmentHashes: []
+    });
+
+    expect(legacy).toBe(typed);
+  });
+
+  it("ignores capturedAt and canonicalizes asset metadata", async () => {
+    const first = await computeContentFingerprint({
+      sourceKind: "social_post",
+      sourcePlatform: "xiaohongshu",
+      externalRef: "note-123",
+      metadata: {
+        author: "合成作者",
+        canonicalUrl: "https://www.xiaohongshu.com/explore/note-123",
+        capturedAt: "2026-09-08T01:00:00.000Z",
+        assets: [
+          { clientId: "img-b", ordinal: 1, alt: "second" },
+          { clientId: "img-a", ordinal: 0, alt: "first" }
+        ]
+      },
+      rawText: "合成正文",
+      messages: [],
+      attachmentHashes: ["b".repeat(64), "a".repeat(64)]
+    });
+    const second = await computeContentFingerprint({
+      sourceKind: "social_post",
+      sourcePlatform: "xiaohongshu",
+      externalRef: "note-123",
+      metadata: {
+        author: "合成作者",
+        canonicalUrl: "https://www.xiaohongshu.com/explore/note-123",
+        capturedAt: "2026-09-08T02:00:00.000Z",
+        assets: [
+          { clientId: "img-a", ordinal: 0, alt: "first" },
+          { clientId: "img-b", ordinal: 1, alt: "second" }
+        ]
+      },
+      rawText: "合成正文",
+      messages: [],
+      attachmentHashes: ["a".repeat(64), "b".repeat(64)]
+    });
+
+    expect(first).toBe(second);
+  });
 });
