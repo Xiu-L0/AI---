@@ -1,31 +1,5 @@
-import { testFixtureOrigin } from "../chatgpt/origins";
 import type { AdapterPageContext, SourceAdapter } from "./types";
-
-const XIAOHONGSHU_ORIGIN = "https://www.xiaohongshu.com";
-const NOTE_PATH = /^\/(?:explore|discovery\/item)\/([^/?#]+)$/;
-
-function xiaohongshuNoteId(
-  url: URL,
-  configured = import.meta.env.WXT_TEST_FIXTURE_ORIGIN,
-  testBuild = import.meta.env.WXT_TEST_BUILD === "1",
-): string | null {
-  const fixtureOrigin = testFixtureOrigin(configured, testBuild);
-  const allowedOrigin =
-    url.origin === XIAOHONGSHU_ORIGIN ||
-    (fixtureOrigin !== null && url.origin === fixtureOrigin);
-  if (!allowedOrigin) return null;
-  if (url.origin === XIAOHONGSHU_ORIGIN && url.protocol !== "https:") {
-    return null;
-  }
-  const match = url.pathname.match(NOTE_PATH);
-  if (!match?.[1]) return null;
-  try {
-    const decoded = decodeURIComponent(match[1]).trim();
-    return decoded.length > 0 && decoded.length <= 500 ? decoded : null;
-  } catch {
-    return null;
-  }
-}
+import { xiaohongshuNoteId } from "../xiaohongshu/origins";
 
 export function createXiaohongshuAdapter(): SourceAdapter<never> {
   return {
@@ -34,7 +8,7 @@ export function createXiaohongshuAdapter(): SourceAdapter<never> {
       throw new Error("小红书笔记提取尚未启用");
     },
     match(url): AdapterPageContext | null {
-      const originRef = xiaohongshuNoteId(url);
+      const originRef = xiaohongshuNoteId(url.href);
       if (originRef === null) return null;
       return {
         adapterId: "xiaohongshu",
