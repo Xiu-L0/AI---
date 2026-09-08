@@ -15,6 +15,7 @@
     "@recall/contracts": "workspace:*",
     "@recall/domain": "workspace:*",
     "@supabase/supabase-js": "^2.111.0",
+    "sharp": "0.34.5",
     "zod": "^4.0.0"
   },
   "devDependencies": {

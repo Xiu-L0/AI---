@@ -38,6 +38,7 @@ export type WorkerLoopOptions = {
   processors: Readonly<Record<string, JobProcessor>>;
   batchSize: number;
   pollIntervalMs: number;
+  heartbeatIntervalMs?: number;
   clock: WorkerClock;
   sleep: (ms: number) => Promise<void>;
   signal: AbortSignal;
@@ -89,8 +90,58 @@ function toFailure(error: unknown): ProcessingFailure {
   };
 }
 
+function isLeaseLoss(error: unknown) {
+  return (
+    error instanceof Error &&
+    (/lease/i.test(error.message) || ("code" in error && error.code === "lease_not_owned"))
+  );
+}
+
+async function withHeartbeat<T>(
+  queue: ProcessingQueue,
+  job: ClaimedJob,
+  heartbeatIntervalMs: number | undefined,
+  work: () => Promise<T>,
+): Promise<T> {
+  if (heartbeatIntervalMs === undefined || heartbeatIntervalMs <= 0) {
+    return work();
+  }
+
+  let stopped = false;
+  const heartbeatState: { inFlight: Promise<void> | null } = { inFlight: null };
+  let leaseLost: unknown = null;
+  const timer = setInterval(() => {
+    if (stopped || heartbeatState.inFlight !== null) return;
+    heartbeatState.inFlight = queue
+      .heartbeat(job)
+      .catch((error) => {
+        leaseLost = error;
+      })
+      .finally(() => {
+        heartbeatState.inFlight = null;
+      });
+  }, heartbeatIntervalMs);
+
+  try {
+    const result = await work();
+    if (leaseLost !== null) {
+      throw leaseLost instanceof Error
+        ? leaseLost
+        : new ProcessorError("lease_not_owned", "OCR heartbeat lost the processing lease", false);
+    }
+    return result;
+  } finally {
+    stopped = true;
+    clearInterval(timer);
+    if (heartbeatState.inFlight !== null) {
+      await heartbeatState.inFlight.catch(() => undefined);
+    }
+  }
+}
+
 export async function runWorkerLoop(options: WorkerLoopOptions): Promise<void> {
-  const { queue, processors, batchSize, pollIntervalMs, sleep, signal } = options;
+  const { queue, processors, batchSize, pollIntervalMs, heartbeatIntervalMs, sleep, signal } =
+    options;
 
   while (!signal.aborted) {
     const jobs = await queue.claim(batchSize);
@@ -109,10 +160,17 @@ export async function runWorkerLoop(options: WorkerLoopOptions): Promise<void> {
         if (!processor) {
           throw new UnknownJobTypeError(job.jobType);
         }
-        const result = await processor(job);
+        const result = await withHeartbeat(queue, job, heartbeatIntervalMs, () => processor(job));
         await queue.complete(job, result);
       } catch (error) {
-        await queue.fail(job, toFailure(error));
+        const failure = isLeaseLoss(error)
+          ? {
+              errorCode: "lease_not_owned",
+              errorDetail: "Processing lease was lost during heartbeat",
+              retryable: false,
+            }
+          : toFailure(error);
+        await queue.fail(job, failure);
       }
     }
   }

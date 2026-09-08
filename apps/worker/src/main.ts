@@ -4,12 +4,18 @@ import { loadWorkerConfig } from "./config";
 import { createBuildSourceBlocksProcessor } from "./processors/build-source-blocks";
 import { createExtractKnowledgeProcessor } from "./processors/extract-knowledge";
 import { createNormalizeSourceProcessor } from "./processors/normalize-source";
+import { createOcrAssetsProcessor } from "./processors/ocr-assets";
 import { DeepSeekTextModel } from "./providers/deepseek-text-model";
+import { GlmOcrProvider } from "./providers/glm-ocr";
 import { PostgresProcessingQueue } from "./queue/processing-queue";
 import {
   PostgresKnowledgeRepository,
   type KnowledgeQueryClient,
 } from "./repositories/knowledge-repository";
+import {
+  PostgresOcrRepository,
+  type OcrQueryClient,
+} from "./repositories/ocr-repository";
 import {
   PostgresSourceRepository,
   type SourceQueryClient,
@@ -39,10 +45,20 @@ async function main() {
     supabase as unknown as KnowledgeQueryClient,
     config.workerId,
   );
+  const ocr = new PostgresOcrRepository(
+    supabase as unknown as OcrQueryClient,
+    config.workerId,
+  );
   const model = new DeepSeekTextModel({
     apiKey: config.deepseekApiKey,
     baseUrl: config.deepseekBaseUrl,
     model: config.deepseekModel,
+  });
+  const glmOcr = new GlmOcrProvider({
+    apiKey: config.zhipuApiKey,
+    baseUrl: config.glmOcrBaseUrl,
+    model: config.glmOcrModel,
+    timeoutMs: config.glmOcrTimeoutMs,
   });
 
   try {
@@ -50,7 +66,13 @@ async function main() {
       queue,
       processors: {
         normalize_source: createNormalizeSourceProcessor(sources),
-        build_source_blocks: createBuildSourceBlocksProcessor(sources),
+        ocr_assets: createOcrAssetsProcessor({
+          sources,
+          ocr,
+          provider: glmOcr,
+          allowSensitiveExternalAi: config.allowSensitiveExternalAi,
+        }),
+        build_source_blocks: createBuildSourceBlocksProcessor(sources, ocr),
         extract_knowledge: createExtractKnowledgeProcessor({
           sources,
           knowledge,
@@ -60,6 +82,7 @@ async function main() {
       },
       batchSize: config.batchSize,
       pollIntervalMs: config.pollIntervalMs,
+      heartbeatIntervalMs: Math.max(5_000, Math.floor((config.leaseSeconds * 1_000) / 3)),
       clock: { now: () => new Date() },
       sleep: (ms) =>
         new Promise((resolve) => {

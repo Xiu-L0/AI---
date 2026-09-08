@@ -24,9 +24,12 @@ const SourceMessageSchema = z.object({
 
 const SourceAttachmentSchema = z.object({
   id: UuidSchema,
+  client_id: z.string().min(1),
   file_name: z.string().min(1),
   mime_type: z.string().min(1),
   byte_size: z.coerce.number().int().nonnegative(),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  storage_path: z.string().min(1),
 });
 
 const ClaimedSourceRowSchema = z.object({
@@ -37,10 +40,14 @@ const ClaimedSourceRowSchema = z.object({
   capture_status: z.string().min(1),
   missing_elements: z.array(z.string()),
   raw_text: z.string(),
+  metadata_json: z.record(z.string(), z.unknown()).nullable().optional(),
   source_items: z.object({
     id: UuidSchema,
     title: z.string().min(1),
-    source: z.string().min(1),
+    source: z.string().nullable(),
+    source_platform: z.string().min(1),
+    source_kind: z.string().min(1),
+    sensitivity: z.string().min(1),
     space_id: UuidSchema,
     owner_user_id: UuidSchema,
   }),
@@ -52,7 +59,10 @@ export type ClaimedSource = {
   item: {
     id: string;
     title: string;
-    source: string;
+    source: string | null;
+    sourcePlatform: string;
+    sourceKind: string;
+    sensitivity: string;
     spaceId: string;
   };
   version: {
@@ -61,6 +71,7 @@ export type ClaimedSource = {
     missingElements: string[];
     rawText: string;
     captureStatus: string;
+    metadata: Record<string, unknown> | null;
   };
   messages: Array<{
     id: string;
@@ -71,15 +82,19 @@ export type ClaimedSource = {
   }>;
   attachments: Array<{
     id: string;
+    clientId: string;
     fileName: string;
     mimeType: string;
     byteSize: number;
+    sha256: string;
+    storagePath: string;
   }>;
 };
 
 export type SourceBlockDraft = {
-  sourceMessageId: string;
-  blockType: "message";
+  sourceMessageId: string | null;
+  sourceAttachmentId: string | null;
+  blockType: "message" | "paragraph" | "metadata" | "ocr_region";
   ordinal: number;
   locatorKey: string;
   locatorJson: Record<string, unknown>;
@@ -118,7 +133,7 @@ export class PostgresSourceRepository implements SourceRepository {
     const result = await this.client
       .from("source_versions")
       .select(
-        "id, owner_user_id, source_item_id, version, capture_status, missing_elements, raw_text, source_items!inner(id, title, source, space_id, owner_user_id), source_messages(id, external_message_id, role, body, ordinal), source_attachments(id, file_name, mime_type, byte_size)",
+        "id, owner_user_id, source_item_id, version, capture_status, missing_elements, raw_text, metadata_json, source_items!inner(id, title, source, source_platform, source_kind, sensitivity, space_id, owner_user_id), source_messages(id, external_message_id, role, body, ordinal), source_attachments(id, client_id, file_name, mime_type, byte_size, sha256, storage_path)",
       )
       .eq("id", job.sourceVersionId)
       .eq("owner_user_id", job.ownerUserId)
@@ -167,6 +182,9 @@ export class PostgresSourceRepository implements SourceRepository {
         id: row.source_items.id,
         title: row.source_items.title,
         source: row.source_items.source,
+        sourcePlatform: row.source_items.source_platform,
+        sourceKind: row.source_items.source_kind,
+        sensitivity: row.source_items.sensitivity,
         spaceId: row.source_items.space_id,
       },
       version: {
@@ -175,6 +193,7 @@ export class PostgresSourceRepository implements SourceRepository {
         missingElements: row.missing_elements,
         rawText: row.raw_text,
         captureStatus: row.capture_status,
+        metadata: row.metadata_json ?? null,
       },
       messages: row.source_messages.map((message) => ({
         id: message.id,
@@ -185,9 +204,12 @@ export class PostgresSourceRepository implements SourceRepository {
       })),
       attachments: row.source_attachments.map((attachment) => ({
         id: attachment.id,
+        clientId: attachment.client_id,
         fileName: attachment.file_name,
         mimeType: attachment.mime_type,
         byteSize: attachment.byte_size,
+        sha256: attachment.sha256,
+        storagePath: attachment.storage_path,
       })),
     };
   }
@@ -216,6 +238,7 @@ export class PostgresSourceRepository implements SourceRepository {
       p_worker_id: this.workerId,
       p_blocks: blocks.map((block) => ({
         source_message_id: block.sourceMessageId,
+        source_attachment_id: block.sourceAttachmentId,
         block_type: block.blockType,
         ordinal: block.ordinal,
         locator_key: block.locatorKey,

@@ -41,6 +41,9 @@ function source(overrides: Partial<ClaimedSource> = {}): ClaimedSource {
       id: "10000000-0000-4000-8000-0000000000c1",
       title: "ChatGPT extract fixture",
       source: "chatgpt_web",
+      sourcePlatform: "chatgpt",
+      sourceKind: "ai_conversation",
+      sensitivity: "normal",
       spaceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     },
     version: {
@@ -49,6 +52,7 @@ function source(overrides: Partial<ClaimedSource> = {}): ClaimedSource {
       missingElements: [],
       rawText: "",
       captureStatus: "complete",
+      metadata: null,
     },
     messages: [],
     attachments: [],
@@ -64,6 +68,7 @@ function blocks(): KnowledgeSourceBlock[] {
       ordinal: 0,
       text: "Evidence blocks keep citations stable.",
       role: "user",
+      blockType: "message",
     },
     {
       id: "60000000-0000-4000-8000-0000000000c2",
@@ -71,6 +76,7 @@ function blocks(): KnowledgeSourceBlock[] {
       ordinal: 1,
       text: "A block is addressed by locatorKey.",
       role: "assistant",
+      blockType: "message",
     },
   ];
 }
@@ -360,5 +366,74 @@ describe("createExtractKnowledgeProcessor", () => {
 
     expect(persistExtraction).toHaveBeenCalledTimes(2);
     expect(persistExtraction.mock.calls[0]?.[1]).toEqual(persistExtraction.mock.calls[1]?.[1]);
+  });
+
+  it("extracts Xiaohongshu social-post blocks with source role and block type", async () => {
+    const { model, requests } = captureModel(async (request) => ({
+      value: request.parse(
+        extraction({
+          citations: [
+            {
+              knowledgeClientKey: "draft-1",
+              locatorKey: "post:body",
+              claimPath: "l0Summary",
+              quoteExcerpt: "Evidence blocks keep citations stable.",
+            },
+          ],
+        }),
+      ),
+      provider: "deepseek",
+      model: "deepseek-v4-flash",
+      usage: { inputTokens: 8, outputTokens: 4 },
+    }));
+    const { processor, persistExtraction } = createProcessor({
+      model,
+      source: source({
+        item: {
+          ...source().item,
+          source: null,
+          sourcePlatform: "xiaohongshu",
+          sourceKind: "social_post",
+          title: "Synthetic XHS",
+        },
+        messages: [],
+      }),
+      blocks: [
+        {
+          id: "60000000-0000-4000-8000-0000000000d1",
+          locatorKey: "post:body",
+          ordinal: 0,
+          text: "Evidence blocks keep citations stable.",
+          role: "source",
+          blockType: "paragraph",
+        },
+        {
+          id: "60000000-0000-4000-8000-0000000000d2",
+          locatorKey: "image:xhs-image-1/page:1/region:0",
+          ordinal: 2,
+          text: "Synthetic OCR markdown.",
+          role: "source",
+          blockType: "ocr_region",
+        },
+      ],
+    });
+
+    const result = await processor(job());
+    expect(result.resultSummary).toBe("persisted 1 knowledge drafts");
+    expect(persistExtraction).toHaveBeenCalledOnce();
+    expect(requests[0]?.userPayload).toMatchObject({
+      blocks: [
+        expect.objectContaining({
+          locatorKey: "post:body",
+          role: "source",
+          blockType: "paragraph",
+        }),
+        expect.objectContaining({
+          locatorKey: "image:xhs-image-1/page:1/region:0",
+          role: "source",
+          blockType: "ocr_region",
+        }),
+      ],
+    });
   });
 });

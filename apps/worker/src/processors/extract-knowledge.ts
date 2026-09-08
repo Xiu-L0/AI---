@@ -187,10 +187,12 @@ export function createExtractKnowledgeProcessor(options: {
 
   return async (job: ClaimedJob): Promise<ProcessingResult> => {
     const source = await sources.loadClaimedSource(job);
-    if (source.item.source !== "chatgpt_web") {
+    const identity = `${source.item.sourcePlatform}:${source.item.sourceKind}`;
+    const EXTRACTABLE_SOURCES = new Set(["chatgpt:ai_conversation", "xiaohongshu:social_post"]);
+    if (!EXTRACTABLE_SOURCES.has(identity) && source.item.source !== "chatgpt_web") {
       throw new ProcessorError(
         "unsupported_source",
-        "Stage 1B only extracts chatgpt_web sources",
+        "No knowledge extractor is registered for this source identity",
         false,
       );
     }
@@ -207,6 +209,7 @@ export function createExtractKnowledgeProcessor(options: {
       blocks: window.blocks.map((block) => ({
         locatorKey: block.locatorKey,
         role: block.role,
+        blockType: block.blockType,
         ordinal: block.ordinal,
         text: block.text,
       })),

@@ -34,6 +34,7 @@ export type KnowledgeExtractionPromptInput = {
   blocks: Array<{
     locatorKey: string;
     role: string;
+    blockType?: string;
     ordinal: number;
     text: string;
   }>;

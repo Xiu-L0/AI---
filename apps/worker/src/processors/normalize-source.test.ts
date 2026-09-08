@@ -28,6 +28,9 @@ function source(overrides: Partial<ClaimedSource> = {}): ClaimedSource {
       id: "10000000-0000-4000-8000-0000000000b1",
       title: "ChatGPT fixture",
       source: "chatgpt_web",
+      sourcePlatform: "chatgpt",
+      sourceKind: "ai_conversation",
+      sensitivity: "normal",
       spaceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     },
     version: {
@@ -36,6 +39,7 @@ function source(overrides: Partial<ClaimedSource> = {}): ClaimedSource {
       missingElements: [],
       rawText: "",
       captureStatus: "complete",
+      metadata: null,
     },
     messages: [
       {
@@ -143,6 +147,74 @@ describe("createNormalizeSourceProcessor", () => {
 
     const result = await createNormalizeSourceProcessor(repository)(job());
     expect(result.resultSummary).toBe("normalized 4 messages");
+    expect(enqueueFollowupJob).toHaveBeenCalledWith(job(), "build_source_blocks");
+  });
+
+  it("routes Xiaohongshu notes with images to ocr_assets", async () => {
+    const enqueueFollowupJob = vi.fn(async () => undefined);
+    const xhs = source({
+      item: {
+        ...source().item,
+        source: null,
+        sourcePlatform: "xiaohongshu",
+        sourceKind: "social_post",
+        title: "Synthetic XHS",
+      },
+      version: {
+        ...source().version,
+        rawText: "synthetic xiaohongshu body",
+        metadata: {
+          author: "合成作者",
+          canonicalUrl: "https://www.xiaohongshu.com/explore/note-1",
+          assets: [{ clientId: "xhs-image-1", ordinal: 0, alt: "" }],
+        },
+      },
+      messages: [],
+      attachments: [
+        {
+          id: "50000000-0000-4000-8000-000000000001",
+          clientId: "xhs-image-1",
+          fileName: "xhs-image-1.png",
+          mimeType: "image/png",
+          byteSize: 12,
+          sha256: "a".repeat(64),
+          storagePath: "00000000-0000-4000-8000-0000000000b1/xhs-image-1.png",
+        },
+      ],
+    });
+    const repository: SourceRepository = {
+      loadClaimedSource: async () => xhs,
+      enqueueFollowupJob,
+      replaceSourceBlocks: async () => {
+        throw new Error("normalize must not persist blocks");
+      },
+    };
+    const result = await createNormalizeSourceProcessor(repository)(job());
+    expect(result.resultSummary).toContain("queued OCR");
+    expect(enqueueFollowupJob).toHaveBeenCalledWith(job(), "ocr_assets");
+  });
+
+  it("skips OCR when a Xiaohongshu note has no eligible images", async () => {
+    const enqueueFollowupJob = vi.fn(async () => undefined);
+    const xhs = source({
+      item: {
+        ...source().item,
+        source: null,
+        sourcePlatform: "xiaohongshu",
+        sourceKind: "social_post",
+      },
+      messages: [],
+      attachments: [],
+    });
+    const repository: SourceRepository = {
+      loadClaimedSource: async () => xhs,
+      enqueueFollowupJob,
+      replaceSourceBlocks: async () => {
+        throw new Error("normalize must not persist blocks");
+      },
+    };
+    const result = await createNormalizeSourceProcessor(repository)(job());
+    expect(result.resultSummary).toContain("without OCR images");
     expect(enqueueFollowupJob).toHaveBeenCalledWith(job(), "build_source_blocks");
   });
 });

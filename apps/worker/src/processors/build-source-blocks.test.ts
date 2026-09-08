@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ClaimedJob } from "../worker-loop";
 import type { ClaimedSource, SourceRepository } from "../repositories/source-repository";
-import { buildSourceBlocks, createBuildSourceBlocksProcessor, hashMessageBlock } from "./build-source-blocks";
+import { buildSourceBlocks, buildSocialPostBlocks, createBuildSourceBlocksProcessor, hashMessageBlock } from "./build-source-blocks";
 import { normalizeSource } from "./normalize-source";
 
 function job(overrides: Partial<ClaimedJob> = {}): ClaimedJob {
@@ -21,12 +21,15 @@ function job(overrides: Partial<ClaimedJob> = {}): ClaimedJob {
   };
 }
 
-function source(): ClaimedSource {
+function source(overrides: Partial<ClaimedSource> = {}): ClaimedSource {
   return {
     item: {
       id: "10000000-0000-4000-8000-0000000000b1",
       title: "ChatGPT fixture",
       source: "chatgpt_web",
+      sourcePlatform: "chatgpt",
+      sourceKind: "ai_conversation",
+      sensitivity: "normal",
       spaceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     },
     version: {
@@ -35,6 +38,7 @@ function source(): ClaimedSource {
       missingElements: ["missing image"],
       rawText: "",
       captureStatus: "partial",
+      metadata: null,
     },
     messages: [
       {
@@ -53,6 +57,7 @@ function source(): ClaimedSource {
       },
     ],
     attachments: [],
+    ...overrides,
   };
 }
 
@@ -84,6 +89,83 @@ describe("buildSourceBlocks", () => {
     expect(blocks[1]?.textContent).toContain("```ts\r\nconst  x  =  1;\r\n```");
   });
 
+  it("builds Xiaohongshu paragraph, metadata and OCR region blocks with attachment ids", () => {
+    const xhs = source({
+      item: {
+        ...source().item,
+        source: null,
+        sourcePlatform: "xiaohongshu",
+        sourceKind: "social_post",
+      },
+      version: {
+        ...source().version,
+        rawText: "synthetic xiaohongshu body",
+        missingElements: [],
+        captureStatus: "complete",
+        metadata: {
+          author: "合成作者",
+          canonicalUrl: "https://www.xiaohongshu.com/explore/note-1",
+        },
+      },
+      messages: [],
+      attachments: [
+        {
+          id: "50000000-0000-4000-8000-000000000001",
+          clientId: "xhs-image-1",
+          fileName: "xhs-image-1.png",
+          mimeType: "image/png",
+          byteSize: 12,
+          sha256: "a".repeat(64),
+          storagePath: "00000000-0000-4000-8000-0000000000b1/a.png",
+        },
+      ],
+    });
+    const blocks = buildSocialPostBlocks(xhs, [
+      {
+        id: "70000000-0000-4000-8000-000000000001",
+        sourceAttachmentId: "50000000-0000-4000-8000-000000000001",
+        inputSha256: "b".repeat(64),
+        provider: "zhipu",
+        model: "glm-ocr",
+        providerRequestId: "req-ocr-1xxxxx",
+        markdown: "Synthetic OCR markdown.",
+        layoutDetails: [
+          {
+            page: 1,
+            index: 0,
+            label: "text",
+            bbox: [0.1, 0.1, 0.5, 0.3],
+            content: "Synthetic OCR markdown.",
+            width: 600,
+            height: 800,
+          },
+        ],
+        dataInfo: { pages: [{ width: 600, height: 800 }] },
+        usage: null,
+      },
+    ]);
+    expect(blocks.map((block) => block.locatorKey)).toEqual([
+      "post:body",
+      "post:metadata",
+      "image:xhs-image-1/page:1/region:0",
+    ]);
+    expect(blocks[2]).toMatchObject({
+      blockType: "ocr_region",
+      ordinal: 2,
+      sourceAttachmentId: "50000000-0000-4000-8000-000000000001",
+      textContent: "Synthetic OCR markdown.",
+      locatorJson: {
+        page: 1,
+        index: 0,
+        label: "text",
+        bbox: [0.1, 0.1, 0.5, 0.3],
+        provider: "zhipu",
+        model: "glm-ocr",
+        sourceAttachmentId: "50000000-0000-4000-8000-000000000001",
+      },
+    });
+  });
+
   it("rerunning the same version yields identical locator keys and hashes", () => {
     const first = buildSourceBlocks(normalizeSource(source()));
     const second = buildSourceBlocks(normalizeSource(source()));
@@ -104,13 +186,115 @@ describe("createBuildSourceBlocksProcessor", () => {
       replaceSourceBlocks,
     };
 
-    const result = await createBuildSourceBlocksProcessor(repository)(job());
+    const result = await createBuildSourceBlocksProcessor(repository, {
+      downloadAttachment: async () => {
+        throw new Error("chatgpt blocks must not download OCR attachments");
+      },
+      findResult: async () => null,
+      persistResult: async () => {
+        throw new Error("chatgpt blocks must not persist OCR");
+      },
+      listResults: async () => {
+        throw new Error("chatgpt blocks must not list OCR");
+      },
+    })(job());
     expect(result.resultSummary).toBe("persisted 2 source blocks");
     expect(replaceSourceBlocks).toHaveBeenCalledOnce();
     expect(replaceSourceBlocks).toHaveBeenCalledWith(
       job(),
       expect.arrayContaining([
         expect.objectContaining({ locatorKey: "message:msg-user/body" }),
+      ]),
+    );
+  });
+
+  it("builds Xiaohongshu OCR regions from version-scoped results", async () => {
+    const xhs = source({
+      item: {
+        ...source().item,
+        source: null,
+        sourcePlatform: "xiaohongshu",
+        sourceKind: "social_post",
+      },
+      version: {
+        ...source().version,
+        rawText: "synthetic xiaohongshu body",
+        missingElements: [],
+        captureStatus: "complete",
+        metadata: {
+          author: "合成作者",
+          canonicalUrl: "https://www.xiaohongshu.com/explore/note-1",
+        },
+      },
+      messages: [],
+      attachments: [
+        {
+          id: "50000000-0000-4000-8000-000000000001",
+          clientId: "xhs-image-1",
+          fileName: "xhs-image-1.png",
+          mimeType: "image/png",
+          byteSize: 12,
+          sha256: "a".repeat(64),
+          storagePath: "00000000-0000-4000-8000-0000000000b1/a.png",
+        },
+      ],
+    });
+    const replaceSourceBlocks = vi.fn(async () => undefined);
+    const listResults = vi.fn(async () => [
+      {
+        id: "70000000-0000-4000-8000-000000000001",
+        sourceAttachmentId: "50000000-0000-4000-8000-000000000001",
+        inputSha256: "b".repeat(64),
+        provider: "zhipu",
+        model: "glm-ocr",
+        providerRequestId: "req-ocr-1xxxxx",
+        markdown: "Synthetic OCR markdown.",
+        layoutDetails: [
+          {
+            page: 1,
+            index: 0,
+            label: "text",
+            bbox: [0.1, 0.1, 0.5, 0.3],
+            content: "Synthetic OCR markdown.",
+            width: 600,
+            height: 800,
+          },
+        ],
+        dataInfo: { pages: [{ width: 600, height: 800 }] },
+        usage: null,
+      },
+    ]);
+
+    await createBuildSourceBlocksProcessor(
+      {
+        loadClaimedSource: async () => xhs,
+        enqueueFollowupJob: async () => {
+          throw new Error("build_source_blocks must enqueue extract via RPC");
+        },
+        replaceSourceBlocks,
+      },
+      {
+        downloadAttachment: async () => {
+          throw new Error("block builder must not download attachments");
+        },
+        findResult: async () => {
+          throw new Error("block builder must not look up OCR by attachment alone");
+        },
+        persistResult: async () => {
+          throw new Error("block builder must not persist OCR");
+        },
+        listResults,
+      },
+    )(job());
+
+    expect(listResults).toHaveBeenCalledWith(job());
+    expect(replaceSourceBlocks).toHaveBeenCalledWith(
+      job(),
+      expect.arrayContaining([
+        expect.objectContaining({
+          locatorKey: "image:xhs-image-1/page:1/region:0",
+          sourceAttachmentId: "50000000-0000-4000-8000-000000000001",
+        }),
       ]),
     );
   });

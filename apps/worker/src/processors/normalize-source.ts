@@ -1,6 +1,7 @@
 import type { ClaimedJob, JobProcessor, ProcessingResult } from "../worker-loop";
 import { ProcessorError } from "../worker-loop";
 import type { ClaimedSource, SourceRepository } from "../repositories/source-repository";
+import { eligibleOcrAttachments } from "./ocr-assets";
 
 export type NormalizedMessageRole = "user" | "assistant" | "system" | "tool";
 
@@ -55,11 +56,22 @@ export function normalizeMessageBody(body: string) {
   return segments.join("\n\n");
 }
 
+export function isChatGptSource(source: ClaimedSource) {
+  return (
+    source.item.source === "chatgpt_web" ||
+    (source.item.sourcePlatform === "chatgpt" && source.item.sourceKind === "ai_conversation")
+  );
+}
+
+export function isXiaohongshuSource(source: ClaimedSource) {
+  return source.item.sourcePlatform === "xiaohongshu" && source.item.sourceKind === "social_post";
+}
+
 export function normalizeSource(source: ClaimedSource): NormalizedSourceV1 {
-  if (source.item.source !== "chatgpt_web") {
+  if (!isChatGptSource(source)) {
     throw new ProcessorError(
       "unsupported_source",
-      `Stage 1B only normalizes chatgpt_web sources`,
+      "ChatGPT normalization requires chatgpt:ai_conversation",
       false,
     );
   }
@@ -88,10 +100,32 @@ export function createNormalizeSourceProcessor(
 ): JobProcessor {
   return async (job: ClaimedJob): Promise<ProcessingResult> => {
     const source = await repository.loadClaimedSource(job);
-    const normalized = normalizeSource(source);
-    await repository.enqueueFollowupJob(job, "build_source_blocks");
-    return {
-      resultSummary: `normalized ${normalized.messages.length} messages`,
-    };
+    if (isChatGptSource(source)) {
+      const normalized = normalizeSource(source);
+      await repository.enqueueFollowupJob(job, "build_source_blocks");
+      return {
+        resultSummary: `normalized ${normalized.messages.length} messages`,
+      };
+    }
+
+    if (isXiaohongshuSource(source)) {
+      const eligible = eligibleOcrAttachments(source);
+      if (eligible.length === 0) {
+        await repository.enqueueFollowupJob(job, "build_source_blocks");
+        return {
+          resultSummary: "normalized social post without OCR images",
+        };
+      }
+      await repository.enqueueFollowupJob(job, "ocr_assets");
+      return {
+        resultSummary: `normalized social post; queued OCR for ${eligible.length} images`,
+      };
+    }
+
+    throw new ProcessorError(
+      "unsupported_source",
+      "No normalizer is registered for this source identity",
+      false,
+    );
   };
 }

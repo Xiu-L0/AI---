@@ -15,6 +15,7 @@ const SourceBlockRowSchema = z.object({
   locator_key: z.string().min(1),
   ordinal: z.coerce.number().int().nonnegative(),
   text_content: z.string(),
+  block_type: z.string().min(1).optional(),
   locator_json: z.record(z.string(), z.unknown()).nullable().optional(),
 });
 
@@ -36,6 +37,7 @@ export type KnowledgeSourceBlock = {
   ordinal: number;
   text: string;
   role: string;
+  blockType: string;
 };
 
 export type KnowledgeExtractionInputScope = {
@@ -108,9 +110,10 @@ export type KnowledgeQueryClient = QueueRpcClient & {
   };
 };
 
-function readRole(locatorJson: Record<string, unknown> | null | undefined) {
+function readRole(locatorJson: Record<string, unknown> | null | undefined, blockType?: string) {
   const role = locatorJson?.role;
-  return typeof role === "string" && role.length > 0 ? role : "user";
+  if (typeof role === "string" && role.length > 0) return role;
+  return blockType === "message" ? "user" : "source";
 }
 
 export class PostgresKnowledgeRepository implements KnowledgeRepository {
@@ -122,7 +125,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
   async listSourceBlocks(job: ClaimedJob): Promise<KnowledgeSourceBlock[]> {
     const result = await this.client
       .from("source_blocks")
-      .select("id, locator_key, ordinal, text_content, locator_json")
+      .select("id, locator_key, ordinal, text_content, block_type, locator_json")
       .eq("source_version_id", job.sourceVersionId)
       .eq("owner_user_id", job.ownerUserId)
       .eq("space_id", job.spaceId)
@@ -152,7 +155,8 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
       locatorKey: row.locator_key,
       ordinal: row.ordinal,
       text: row.text_content,
-      role: readRole(row.locator_json),
+      role: readRole(row.locator_json, row.block_type),
+      blockType: row.block_type ?? "message",
     }));
   }
 

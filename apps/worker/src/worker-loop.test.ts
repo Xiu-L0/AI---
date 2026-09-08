@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   installWorkerShutdown,
@@ -164,6 +164,102 @@ describe("runWorkerLoop", () => {
 
     expect(claim).not.toHaveBeenCalled();
     expect(completed).toEqual([]);
+  });
+});
+
+describe("runWorkerLoop heartbeat", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps a long OCR job leased and leaves no timer after complete", async () => {
+    vi.useFakeTimers();
+    const claimed = job({ jobType: "ocr_assets" });
+    const abort = new AbortController();
+    let claimCount = 0;
+    const heartbeat = vi.fn(async () => undefined);
+    const { queue, completed, failed } = createQueue(async () => {
+      claimCount += 1;
+      if (claimCount === 1) return [claimed];
+      abort.abort();
+      return [];
+    });
+    queue.heartbeat = heartbeat;
+
+    const loop = runWorkerLoop({
+      queue,
+      processors: {
+        ocr_assets: async () => {
+          await new Promise((resolve) => {
+            setTimeout(resolve, 130_000);
+          });
+          return { resultSummary: "recognized 1 of 1 images" };
+        },
+      },
+      batchSize: 1,
+      pollIntervalMs: 1500,
+      heartbeatIntervalMs: 40_000,
+      clock: { now: () => new Date("2026-09-08T06:00:00.000Z") },
+      sleep: async () => {
+        abort.abort();
+      },
+      signal: abort.signal,
+    });
+
+    await vi.advanceTimersByTimeAsync(130_000);
+    await loop;
+
+    expect(heartbeat.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(completed).toHaveLength(1);
+    expect(failed).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
+    vi.useRealTimers();
+  });
+
+  it("fails the job when heartbeat loses the lease", async () => {
+    vi.useFakeTimers();
+    const claimed = job({ jobType: "ocr_assets" });
+    const abort = new AbortController();
+    let claimCount = 0;
+    const { queue, completed, failed } = createQueue(async () => {
+      claimCount += 1;
+      if (claimCount === 1) return [claimed];
+      abort.abort();
+      return [];
+    });
+    queue.heartbeat = vi.fn(async () => {
+      const error = new Error("Queue RPC lease is not owned by this worker");
+      (error as Error & { code: string }).code = "lease_not_owned";
+      throw error;
+    });
+
+    const loop = runWorkerLoop({
+      queue,
+      processors: {
+        ocr_assets: async () => {
+          await new Promise((resolve) => {
+            setTimeout(resolve, 80_000);
+          });
+          return { resultSummary: "should not complete" };
+        },
+      },
+      batchSize: 1,
+      pollIntervalMs: 1500,
+      heartbeatIntervalMs: 40_000,
+      clock: { now: () => new Date("2026-09-08T06:00:00.000Z") },
+      sleep: async () => {
+        abort.abort();
+      },
+      signal: abort.signal,
+    });
+
+    await vi.advanceTimersByTimeAsync(80_000);
+    await loop;
+
+    expect(completed).toEqual([]);
+    expect(failed[0]?.failure.errorCode).toBe("lease_not_owned");
+    expect(vi.getTimerCount()).toBe(0);
+    vi.useRealTimers();
   });
 });
 
