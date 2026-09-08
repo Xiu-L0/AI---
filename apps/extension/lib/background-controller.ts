@@ -4,12 +4,13 @@ import {
   type CaptureStatusResult,
 } from "@recall/contracts";
 
+import { createAdapterRegistry } from "./adapters/registry";
+import type { SourceAdapter } from "./adapters/types";
 import type { CaptureApiClient } from "./api-client";
 import type { AttachmentStore } from "./attachment-store";
 import type { ExtractChatGptResponse } from "./chatgpt/content-message";
 import { chatGptConversationRef } from "./chatgpt/origins";
-import { toChatGptCaptureDraft } from "./chatgpt/to-capture-draft";
-import type { CaptureDraft, OutboxItem } from "./outbox-types";
+import type { CaptureDraft, ChatGptCaptureScope, OutboxItem } from "./outbox-types";
 import {
   ADD_SCREENSHOT_RECOVERY,
   CAPTURE_CURRENT_PAGE,
@@ -79,6 +80,8 @@ export type BackgroundControllerDependencies = {
   scheduleRetryAlarm(when: number): Promise<void>;
   setBadgeText(text: string): Promise<void>;
 };
+
+const UNSUPPORTED_CHATGPT_TAB = "当前标签页不是可采集的 ChatGPT 会话";
 
 function conversationRef(urlValue: string): string | null {
   return chatGptConversationRef(urlValue);
@@ -218,6 +221,9 @@ export function createBackgroundController(
 ) {
   const now = () => dependencies.now?.() ?? new Date();
   const screenshotRecoveryFlights = new Map<string, Promise<OutboxItem>>();
+  const registry = createAdapterRegistry({
+    extractChatGpt: (tabId) => dependencies.extractChatGpt(tabId),
+  });
 
   async function synchronizeUiAndAlarm(
     activeItemIds: ReadonlySet<string> = new Set(),
@@ -355,16 +361,13 @@ export function createBackgroundController(
   async function persistLocalTerminalCapture(input: {
     code: string;
     message: unknown;
+    originRef: string;
     runtimeMessage: Extract<
       RecallRuntimeMessage,
       { type: typeof CAPTURE_CURRENT_PAGE }
     >;
     tab: BrowserTab;
   }): Promise<OutboxItem> {
-    const originConversationRef = conversationRef(input.tab.url);
-    if (originConversationRef === null) {
-      throw new Error("当前标签页不是可采集的 ChatGPT 会话");
-    }
     const failureReason = safeFailureReason(
       input.message,
       "ChatGPT 页面内容暂时无法提取",
@@ -374,16 +377,16 @@ export function createBackgroundController(
       {
         attachments: [],
         completeness: "partial",
-        externalRef: `${originConversationRef}#${input.runtimeMessage.scope}:local-failure`,
+        externalRef: `${input.originRef}#${input.runtimeMessage.scope}:local-failure`,
         messages: [],
         missingElements: [failureReason],
-        originConversationRef,
+        originConversationRef: input.originRef,
         originTabId: input.tab.id,
         originUrl: input.tab.url,
         originWindowId: input.tab.windowId,
         pendingImages: [],
         rawText: "",
-        scope: input.runtimeMessage.scope,
+        scope: input.runtimeMessage.scope as ChatGptCaptureScope,
         sensitivity: input.runtimeMessage.sensitivity,
         source: "chatgpt_web",
         title: "ChatGPT 采集异常",
@@ -446,8 +449,16 @@ export function createBackgroundController(
     message: Extract<RecallRuntimeMessage, { type: typeof CAPTURE_CURRENT_PAGE }>,
   ) {
     const tab = await dependencies.getActiveTab();
-    if (tab === null || conversationRef(tab.url) === null) {
-      throw new Error("当前标签页不是可采集的 ChatGPT 会话");
+    if (tab === null) {
+      throw new Error(UNSUPPORTED_CHATGPT_TAB);
+    }
+    const adapter = registry.adapterForUrl(tab.url);
+    const page = adapter?.match(new URL(tab.url)) ?? null;
+    if (adapter === null || page === null) {
+      throw new Error(UNSUPPORTED_CHATGPT_TAB);
+    }
+    if (!page.scopes.includes(message.scope)) {
+      throw new Error("当前来源不支持该保存范围");
     }
     if (message.recoveryOfItemId !== undefined) {
       const recoveryTarget = await dependencies.outbox.get(
@@ -459,48 +470,65 @@ export function createBackgroundController(
       ) {
         throw new Error("只有尚未解决的本地采集异常可以重新采集");
       }
-      if (
-        recoveryTarget.draft.originConversationRef !== conversationRef(tab.url)
-      ) {
-        throw new Error("当前标签页不是原采集异常所属的 ChatGPT 会话");
+      if (recoveryTarget.draft.originConversationRef !== page.originRef) {
+        throw new Error(
+          adapter.id === "chatgpt"
+            ? "当前标签页不是原采集异常所属的 ChatGPT 会话"
+            : "当前标签页不是原采集异常所属的页面",
+        );
       }
     }
-    let extracted: ExtractChatGptResponse;
-    try {
-      extracted = await dependencies.extractChatGpt(tab.id);
-    } catch (error) {
-      return persistLocalTerminalCapture({
-        code: "chatgpt_extraction_failed",
-        message: error,
-        runtimeMessage: message,
-        tab,
-      });
-    }
-    if (!extracted.ok) {
-      return persistLocalTerminalCapture({
-        code: `chatgpt_${extracted.error.code}`,
-        message: extracted.error.message,
-        runtimeMessage: message,
-        tab,
-      });
-    }
     let draft: CaptureDraft;
-    try {
-      draft = toChatGptCaptureDraft({
-        extraction: extracted.extraction,
+    if (adapter.id === "chatgpt") {
+      const chatgptAdapter = adapter as SourceAdapter<ExtractChatGptResponse>;
+      let extracted: ExtractChatGptResponse;
+      try {
+        extracted = await chatgptAdapter.extract(tab.id);
+      } catch (error) {
+        return persistLocalTerminalCapture({
+          code: "chatgpt_extraction_failed",
+          message: error,
+          originRef: page.originRef,
+          runtimeMessage: message,
+          tab,
+        });
+      }
+      if (!extracted.ok) {
+        return persistLocalTerminalCapture({
+          code: `chatgpt_${extracted.error.code}`,
+          message: extracted.error.message,
+          originRef: page.originRef,
+          runtimeMessage: message,
+          tab,
+        });
+      }
+      try {
+        draft = chatgptAdapter.toDraft({
+          extraction: extracted,
+          originTabId: tab.id,
+          originUrl: tab.url,
+          originWindowId: tab.windowId,
+          scope: message.scope,
+          sensitivity: message.sensitivity,
+        });
+      } catch (error) {
+        return persistLocalTerminalCapture({
+          code: "chatgpt_scope_failed",
+          message: error,
+          originRef: page.originRef,
+          runtimeMessage: message,
+          tab,
+        });
+      }
+    } else {
+      const extracted = await adapter.extract(tab.id);
+      draft = adapter.toDraft({
+        extraction: extracted,
         originTabId: tab.id,
         originUrl: tab.url,
         originWindowId: tab.windowId,
         scope: message.scope,
-        selectedText: extracted.selectedText,
         sensitivity: message.sensitivity,
-      });
-    } catch (error) {
-      return persistLocalTerminalCapture({
-        code: "chatgpt_scope_failed",
-        message: error,
-        runtimeMessage: message,
-        tab,
       });
     }
     const queued = await dependencies.outbox.enqueue(draft, {

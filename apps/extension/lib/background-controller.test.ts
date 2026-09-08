@@ -1,6 +1,7 @@
 import type { CaptureReceipt, CaptureStatusResult } from "@recall/contracts";
 import { describe, expect, it, vi } from "vitest";
 
+import { adapterForUrl } from "./adapters/registry";
 import {
   CAPTURE_NOTIFICATION_PREFIX,
   CAPTURE_RETRY_ALARM,
@@ -964,6 +965,36 @@ describe("background controller", () => {
     });
   });
 
+  it("selects adapters by exact origin before extraction", () => {
+    expect(adapterForUrl("https://chatgpt.com/c/abc")?.id).toBe("chatgpt");
+    expect(adapterForUrl("https://www.xiaohongshu.com/explore/abc")?.id).toBe(
+      "xiaohongshu",
+    );
+    expect(
+      adapterForUrl("https://xiaohongshu.com.attacker.example/explore/abc"),
+    ).toBeNull();
+    expect(adapterForUrl("http://www.xiaohongshu.com/explore/abc")).toBeNull();
+  });
+
+  it("does not send Xiaohongshu pages to the ChatGPT extractor", async () => {
+    const test = setup();
+    test.dependencies.getActiveTab = vi.fn(async () => ({
+      id: 11,
+      url: "https://www.xiaohongshu.com/explore/65abc123",
+      windowId: 4,
+    }));
+
+    await expect(
+      test.controller.handleMessage({
+        scope: "web_page",
+        sensitivity: "normal",
+        type: CAPTURE_CURRENT_PAGE,
+      }),
+    ).rejects.not.toThrow("当前标签页不是可采集的 ChatGPT 会话");
+
+    expect(test.dependencies.extractChatGpt).not.toHaveBeenCalled();
+  });
+
   it("rejects lookalike ChatGPT hosts before extraction", async () => {
     const test = setup();
     test.dependencies.getActiveTab = vi.fn(async () => ({
@@ -1047,6 +1078,13 @@ describe("runtime message validation", () => {
       isRecallRuntimeMessage({
         scope: "qa_pair",
         sensitivity: "strictly_sensitive",
+        type: CAPTURE_CURRENT_PAGE,
+      }),
+    ).toBe(true);
+    expect(
+      isRecallRuntimeMessage({
+        scope: "web_page",
+        sensitivity: "normal",
         type: CAPTURE_CURRENT_PAGE,
       }),
     ).toBe(true);

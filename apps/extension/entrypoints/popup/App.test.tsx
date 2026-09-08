@@ -97,6 +97,21 @@ describe("extension popup", () => {
     ).toBe(false);
   });
 
+  it("recognizes Xiaohongshu notes and rejects look-alike hosts", () => {
+    expect(pageContextForUrl("https://www.xiaohongshu.com/explore/abc")).toEqual({
+      label: "小红书网页版",
+      scopes: ["web_page"],
+      supported: true,
+    });
+    expect(
+      pageContextForUrl("https://xiaohongshu.com.attacker.example/explore/abc")
+        .supported,
+    ).toBe(false);
+    expect(
+      pageContextForUrl("http://www.xiaohongshu.com/explore/abc").supported,
+    ).toBe(false);
+  });
+
   it("pairs once and clears the code from the UI", async () => {
     const popupServices = services();
     render(<App services={popupServices} />);

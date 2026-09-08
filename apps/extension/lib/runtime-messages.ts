@@ -11,7 +11,10 @@ export const PAIRING_UPDATED = "recall:pairing-updated";
 
 export type CaptureCurrentPageMessage = {
   recoveryOfItemId?: string;
-  scope: Extract<CaptureScope, "full_conversation" | "qa_pair" | "selection">;
+  scope: Extract<
+    CaptureScope,
+    "full_conversation" | "qa_pair" | "selection" | "web_page"
+  >;
   sensitivity: Sensitivity;
   type: typeof CAPTURE_CURRENT_PAGE;
 };
@@ -65,7 +68,7 @@ export function isRecallRuntimeMessage(
     case CAPTURE_CURRENT_PAGE:
       return (
         typeof message.scope === "string" &&
-        ["full_conversation", "qa_pair", "selection"].includes(
+        ["full_conversation", "qa_pair", "selection", "web_page"].includes(
           message.scope,
         ) &&
         typeof message.sensitivity === "string" &&

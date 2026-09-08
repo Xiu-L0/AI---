@@ -9,6 +9,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { browser } from "wxt/browser";
 
+import { adapterForUrl } from "../../lib/adapters/registry";
 import {
   exchangeExtensionPairingCode,
   ExtensionApiError,
@@ -17,7 +18,6 @@ import {
   getExtensionCredential,
   saveExtensionCredential,
 } from "../../lib/auth-store";
-import { isSupportedChatGptUrl } from "../../lib/chatgpt/origins";
 import {
   isUnresolvedOutboxItem,
   type OutboxItem,
@@ -32,15 +32,15 @@ import {
   RETRY_OUTBOX_ITEM,
 } from "../../lib/runtime-messages";
 
-type SupportedCaptureScope = Extract<
+type PopupCaptureScope = Extract<
   CaptureScope,
-  "full_conversation" | "qa_pair" | "selection"
+  "full_conversation" | "qa_pair" | "selection" | "web_page"
 >;
 
 export type PageContext = {
   label: string;
   supported: boolean;
-  scopes: SupportedCaptureScope[];
+  scopes: PopupCaptureScope[];
 };
 
 export interface PopupServices {
@@ -51,7 +51,7 @@ export interface PopupServices {
   listOutbox(): Promise<OutboxItem[]>;
   capture(input: {
     recoveryOfItemId?: string;
-    scope: SupportedCaptureScope;
+    scope: PopupCaptureScope;
     sensitivity: Sensitivity;
   }): Promise<OutboxItem>;
   retry(itemId: string): Promise<OutboxItem>;
@@ -63,20 +63,31 @@ export function pageContextForUrl(urlValue: string | undefined): PageContext {
   if (!urlValue) {
     return { label: "无法识别当前页面", scopes: [], supported: false };
   }
+  const adapter = adapterForUrl(urlValue);
+  if (adapter === null) {
+    return { label: "当前页面暂不支持自动采集", scopes: [], supported: false };
+  }
   let url: URL;
   try {
     url = new URL(urlValue);
   } catch {
     return { label: "无法识别当前页面", scopes: [], supported: false };
   }
-  if (isSupportedChatGptUrl(url.href)) {
-    return {
-      label: "ChatGPT 网页版",
-      scopes: ["full_conversation", "qa_pair", "selection"],
-      supported: true,
-    };
+  const page = adapter.match(url);
+  if (page === null) {
+    return { label: "当前页面暂不支持自动采集", scopes: [], supported: false };
   }
-  return { label: "当前页面暂不支持自动采集", scopes: [], supported: false };
+  return {
+    label: page.label,
+    scopes: page.scopes.filter(
+      (scope): scope is PopupCaptureScope =>
+        scope === "full_conversation" ||
+        scope === "qa_pair" ||
+        scope === "selection" ||
+        scope === "web_page",
+    ),
+    supported: true,
+  };
 }
 
 async function defaultPageContext(): Promise<PageContext> {
@@ -254,7 +265,7 @@ export function App({ services = defaultServices }: { services?: PopupServices }
   const [pairing, setPairing] = useState(false);
   const [deviceLabel, setDeviceLabel] = useState(browserLabel);
   const [scope, setScope] =
-    useState<SupportedCaptureScope>("full_conversation");
+    useState<PopupCaptureScope>("full_conversation");
   const [sensitivity, setSensitivity] = useState<Sensitivity>("normal");
   const [operation, setOperation] = useState<
     "idle" | "capturing" | "retrying" | "screenshot" | "refreshing"
@@ -509,7 +520,7 @@ export function App({ services = defaultServices }: { services?: PopupServices }
               aria-label="保存范围"
               value={scope}
               onChange={(event) =>
-                setScope(event.target.value as SupportedCaptureScope)
+                setScope(event.target.value as PopupCaptureScope)
               }
             >
               {context.scopes.map((item) => (
@@ -518,7 +529,9 @@ export function App({ services = defaultServices }: { services?: PopupServices }
                     ? "完整会话"
                     : item === "qa_pair"
                       ? "当前问答"
-                      : "选中文字"}
+                      : item === "web_page"
+                        ? "整篇笔记"
+                        : "选中文字"}
                 </option>
               ))}
             </select>
