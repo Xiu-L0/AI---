@@ -1,6 +1,7 @@
 import type {
   CaptureReceipt,
   CaptureStatusResult,
+  StartCaptureInput,
   StartCaptureResult,
 } from "@recall/contracts";
 import { describe, expect, it, vi } from "vitest";
@@ -43,6 +44,8 @@ function item(overrides: Partial<OutboxItem> = {}): OutboxItem {
       scope: "full_conversation",
       sensitivity: "normal",
       source: "chatgpt_web",
+      sourceKind: "ai_conversation",
+      sourcePlatform: "chatgpt",
       title: "Synthetic",
     },
     errorCode: null,
@@ -162,7 +165,8 @@ function pendingImageItem(sourceUrl = "https://images.example.test/image.png") {
           alt: "fixture",
           clientId: "image-1",
           fileName: "image-1.png",
-          messageOrdinal: 1,
+          missingLabel: "第 2 条消息中的图片无法读取",
+          ordinal: 1,
           sourceUrl,
         },
       ],
@@ -465,6 +469,134 @@ describe("capture runner", () => {
     );
   });
 
+  it("keeps a Xiaohongshu image 403 as partial and adds one supplemental screenshot", async () => {
+    const { source: _legacySource, ...baseDraft } = item().draft;
+    const xhsDraft: OutboxItem["draft"] = {
+      ...baseDraft,
+      completeness: "complete",
+      externalRef: "65abc123",
+      messages: [],
+      metadata: {
+        adapterName: "xiaohongshu" as const,
+        adapterVersion: "1",
+        assets: [
+          { alt: "cover", clientId: "xhs-image-1", ordinal: 0 },
+          { alt: "two", clientId: "xhs-image-2", ordinal: 1 },
+          { alt: "three", clientId: "xhs-image-3", ordinal: 2 },
+        ],
+        author: "合成作者",
+        capturedAt: now.toISOString(),
+        canonicalUrl: "https://www.xiaohongshu.com/explore/65abc123",
+      },
+      originConversationRef: "65abc123",
+      originUrl: "https://www.xiaohongshu.com/explore/65abc123",
+      pendingImages: [
+        {
+          alt: "cover",
+          clientId: "xhs-image-1",
+          fileName: "xhs-image-1.png",
+          missingLabel: "第 1 张图片无法读取",
+          ordinal: 0,
+          sourceUrl: "https://sns-webpic-qc.xhscdn.com/fixture/cover.png",
+        },
+        {
+          alt: "two",
+          clientId: "xhs-image-2",
+          fileName: "xhs-image-2.png",
+          missingLabel: "第 2 张图片无法读取",
+          ordinal: 1,
+          sourceUrl: "https://sns-webpic-qc.xhscdn.com/fixture/missing.png",
+        },
+        {
+          alt: "three",
+          clientId: "xhs-image-3",
+          fileName: "xhs-image-3.png",
+          missingLabel: "第 3 张图片无法读取",
+          ordinal: 2,
+          sourceUrl: "https://sns-webpic-qc.xhscdn.com/fixture/detail.png",
+        },
+      ],
+      rawText: "合成正文",
+      scope: "web_page" as const,
+      sourceKind: "social_post" as const,
+      sourcePlatform: "xiaohongshu" as const,
+      title: "合成标题",
+    };
+    const pending = item({
+      attachmentsPrepared: false,
+      draft: xhsDraft,
+    });
+    const outbox = fakeOutbox(pending);
+    const png = syntheticPngBlob();
+    const stored = new Map<string, Blob>();
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("missing.png")) {
+        return new Response("denied", { status: 403 });
+      }
+      return new Response(png, { status: 200, headers: { "content-type": "image/png" } });
+    });
+    const captureVisibleTab = vi.fn(
+      async () =>
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    );
+    const putAttachment = vi.fn(async (key: string, blob: Blob) => {
+      stored.set(key, blob);
+    });
+    const getAttachment = vi.fn(async (key: string) => stored.get(key) ?? null);
+    const api: CaptureApiClient = {
+      finalize: vi.fn(async (_captureId, input) =>
+        receipt("partial", input.missingElements),
+      ),
+      reportFailure: vi.fn(async () => failureReport()),
+      start: vi.fn(async (input: StartCaptureInput) => ({
+        captureId,
+        uploadTargets: input.attachments.map((attachment) => ({
+          clientId: attachment.clientId,
+          storagePath: `${attachment.clientId}.png`,
+          token: "token",
+        })),
+      })),
+      status: vi.fn(),
+    };
+    const runner = createCaptureRunner({
+      attachmentStore: { getAttachment, putAttachment },
+      captureVisibleTab,
+      createId: () => "fallback-id",
+      fetch,
+      focusTab: vi.fn(async () => undefined),
+      getApiClient: async () => api,
+      outbox: outbox.port,
+      upload: vi.fn(async (target) => ({
+        clientId: target.clientId,
+        storagePath: target.storagePath,
+      })),
+    });
+
+    const result = await runner.processOutboxItem("outbox-1", now);
+
+    expect(result.state).toBe("partial");
+    expect(result.receipt?.captureStatus).toBe("partial");
+    expect(result.draft.missingElements.some((item) => item.includes("第 2 张图片"))).toBe(
+      true,
+    );
+    expect(captureVisibleTab).toHaveBeenCalledTimes(1);
+    expect(
+      result.draft.attachments.some((attachment) =>
+        attachment.fileName.startsWith("xhs-fallback-"),
+      ),
+    ).toBe(true);
+    expect(result.draft.metadata?.assets.some((asset) => asset.alt.includes("不是原图"))).toBe(
+      true,
+    );
+    expect(api.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceKind: "social_post",
+        sourcePlatform: "xiaohongshu",
+      }),
+    );
+  });
+
   it.each([429, 500, 503])(
     "keeps a pending image retryable after HTTP %s",
     async (status) => {
@@ -559,7 +691,7 @@ describe("capture runner", () => {
     }
   });
 
-  it("does not follow image redirects before reading response bytes", async () => {
+  it("revalidates the final image URL after following redirects", async () => {
     const outbox = fakeOutbox(pendingImageItem());
     const blob = vi.fn(async () => syntheticPngBlob());
     const api: CaptureApiClient = {
@@ -575,14 +707,12 @@ describe("capture runner", () => {
         getAttachment: vi.fn(async () => null),
         putAttachment: vi.fn(async () => undefined),
       },
-      blockedImageOrigins: ["https://api.recall.test"],
       fetch: vi.fn(async () =>
         ({
           blob,
-          ok: false,
-          status: 0,
-          type: "opaqueredirect",
-          url: "",
+          ok: true,
+          status: 200,
+          url: "http://images.example.test/insecure.png",
         }) as unknown as Response,
       ),
       getApiClient: async () => api,
@@ -593,8 +723,8 @@ describe("capture runner", () => {
 
     expect(result.state).toBe("partial");
     expect(blob).not.toHaveBeenCalled();
-    expect(result.receipt?.missingElements.join(" ")).toContain(
-      "图片重定向未被允许",
+    expect(result.receipt?.missingElements.join(" ")).toMatch(
+      /远程图片必须使用 HTTPS|图片重定向到了非 HTTPS/,
     );
   });
 
@@ -668,10 +798,14 @@ describe("capture runner", () => {
     const result = await runner.processOutboxItem("outbox-1", now);
 
     expect(result.state).toBe("complete");
-    expect(fetcher).toHaveBeenCalledWith(
-      expect.any(URL),
-      expect.objectContaining({ credentials: "omit", redirect: "manual" }),
-    );
+    const fetchCall = fetcher.mock.calls[0] as
+      | [RequestInfo | URL, RequestInit?]
+      | undefined;
+    expect(String(fetchCall?.[0])).toBe("https://images.example.test/image.png");
+    expect(fetchCall?.[1]).toMatchObject({
+      credentials: "omit",
+      redirect: "follow",
+    });
     expect(upload).toHaveBeenCalledTimes(1);
   });
 

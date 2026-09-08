@@ -11,6 +11,7 @@ import {
 } from "../lib/background-controller";
 import { createCaptureRunner } from "../lib/capture-runner";
 import { EXTRACT_CHATGPT } from "../lib/chatgpt/content-message";
+import { EXTRACT_XIAOHONGSHU } from "../lib/xiaohongshu/content-message";
 import { getExtensionCredential } from "../lib/auth-store";
 import {
   enqueueDraft,
@@ -45,6 +46,11 @@ export default defineBackground(() => {
 
   const runner = createCaptureRunner({
     attachmentStore,
+    captureVisibleTab: (windowId) =>
+      browser.tabs.captureVisibleTab(windowId, { format: "png" }),
+    async focusTab(tabId) {
+      await browser.tabs.update(tabId, { active: true });
+    },
     getApiClient,
     outbox: {
       get: getOutboxItem,
@@ -70,6 +76,9 @@ export default defineBackground(() => {
     },
     async extractChatGpt(tabId) {
       return browser.tabs.sendMessage(tabId, { type: EXTRACT_CHATGPT });
+    },
+    async extractXiaohongshu(tabId) {
+      return browser.tabs.sendMessage(tabId, { type: EXTRACT_XIAOHONGSHU });
     },
     async getActiveTab() {
       const [tab] = await browser.tabs.query({ active: true, currentWindow: true });

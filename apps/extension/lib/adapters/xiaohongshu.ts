@@ -1,11 +1,23 @@
-import type { AdapterPageContext, SourceAdapter } from "./types";
+import type { ExtractXiaohongshuResponse } from "../xiaohongshu/content-message";
 import { xiaohongshuNoteId } from "../xiaohongshu/origins";
+import { toXiaohongshuCaptureDraft } from "../xiaohongshu/to-capture-draft";
+import type {
+  AdapterDraftInput,
+  AdapterPageContext,
+  SourceAdapter,
+} from "./types";
 
-export function createXiaohongshuAdapter(): SourceAdapter<never> {
+export type XiaohongshuAdapterDependencies = {
+  extractXiaohongshu(tabId: number): Promise<ExtractXiaohongshuResponse>;
+};
+
+export function createXiaohongshuAdapter(
+  dependencies: XiaohongshuAdapterDependencies,
+): SourceAdapter<ExtractXiaohongshuResponse> {
   return {
     id: "xiaohongshu",
-    async extract() {
-      throw new Error("小红书笔记提取尚未启用");
+    extract(tabId) {
+      return dependencies.extractXiaohongshu(tabId);
     },
     match(url): AdapterPageContext | null {
       const originRef = xiaohongshuNoteId(url.href);
@@ -19,8 +31,21 @@ export function createXiaohongshuAdapter(): SourceAdapter<never> {
         sourcePlatform: "xiaohongshu",
       };
     },
-    toDraft() {
-      throw new Error("小红书采集草稿尚未启用");
+    toDraft(input: AdapterDraftInput<ExtractXiaohongshuResponse>) {
+      if (!input.extraction.ok) {
+        throw new Error(input.extraction.error.message);
+      }
+      if (input.scope !== "web_page") {
+        throw new Error("当前来源不支持该保存范围");
+      }
+      return toXiaohongshuCaptureDraft({
+        capturedAt: input.capturedAt ?? new Date().toISOString(),
+        extraction: input.extraction.extraction,
+        originTabId: input.originTabId,
+        originUrl: input.originUrl,
+        originWindowId: input.originWindowId,
+        sensitivity: input.sensitivity,
+      });
     },
   };
 }

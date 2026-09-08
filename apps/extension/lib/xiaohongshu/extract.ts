@@ -1,4 +1,5 @@
 import {
+  isAllowedXiaohongshuImageUrl,
   xiaohongshuCanonicalUrl,
   xiaohongshuNoteId,
 } from "./origins";
@@ -157,14 +158,14 @@ function isExcludedImage(image: HTMLImageElement): boolean {
 function readableImageUrl(value: string | null | undefined): string | null {
   if (value === null || value === undefined) return null;
   const trimmed = value.trim();
-  if (trimmed.length === 0 || trimmed.length > 10_000) return null;
-  if (!/^https:/i.test(trimmed) && !/^data:image\//i.test(trimmed)) return null;
+  if (!isAllowedXiaohongshuImageUrl(trimmed)) return null;
+  if (/^data:image\//i.test(trimmed)) return trimmed;
   try {
     const url = new URL(trimmed);
     url.hash = "";
     return url.toString();
   } catch {
-    return /^data:image\//i.test(trimmed) ? trimmed : null;
+    return null;
   }
 }
 

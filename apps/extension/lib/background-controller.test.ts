@@ -39,6 +39,8 @@ function draft(): CaptureDraft {
     scope: "full_conversation",
     sensitivity: "normal",
     source: "chatgpt_web",
+    sourceKind: "ai_conversation",
+    sourcePlatform: "chatgpt",
     title: "Synthetic",
   };
 }
@@ -120,6 +122,13 @@ function setup(initial: OutboxItem[] = []) {
       },
       ok: true as const,
       selectedText: "",
+    })),
+    extractXiaohongshu: vi.fn(async () => ({
+      error: {
+        code: "extraction_failed" as const,
+        message: "小红书笔记提取尚未绑定",
+      },
+      ok: false as const,
     })),
     getActiveTab: vi.fn(async () => ({
       id: 7,
@@ -984,15 +993,17 @@ describe("background controller", () => {
       windowId: 4,
     }));
 
-    await expect(
-      test.controller.handleMessage({
-        scope: "web_page",
-        sensitivity: "normal",
-        type: CAPTURE_CURRENT_PAGE,
-      }),
-    ).rejects.not.toThrow("当前标签页不是可采集的 ChatGPT 会话");
+    const result = await test.controller.handleMessage({
+      scope: "web_page",
+      sensitivity: "normal",
+      type: CAPTURE_CURRENT_PAGE,
+    });
+    if (Array.isArray(result)) throw new Error("expected one outbox item");
 
     expect(test.dependencies.extractChatGpt).not.toHaveBeenCalled();
+    expect(test.dependencies.extractXiaohongshu).toHaveBeenCalledWith(11);
+    expect(result.draft.sourcePlatform).toBe("xiaohongshu");
+    expect(result.state).toBe("terminal");
   });
 
   it("rejects lookalike ChatGPT hosts before extraction", async () => {

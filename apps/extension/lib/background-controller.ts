@@ -5,11 +5,12 @@ import {
 } from "@recall/contracts";
 
 import { createAdapterRegistry } from "./adapters/registry";
-import type { SourceAdapter } from "./adapters/types";
+import type { AdapterPageContext, SourceAdapter } from "./adapters/types";
 import type { CaptureApiClient } from "./api-client";
 import type { AttachmentStore } from "./attachment-store";
 import type { ExtractChatGptResponse } from "./chatgpt/content-message";
 import { chatGptConversationRef } from "./chatgpt/origins";
+import type { ExtractXiaohongshuResponse } from "./xiaohongshu/content-message";
 import type { CaptureDraft, ChatGptCaptureScope, OutboxItem } from "./outbox-types";
 import {
   ADD_SCREENSHOT_RECOVERY,
@@ -66,6 +67,7 @@ export type BackgroundControllerDependencies = {
   clearRetryAlarm(): Promise<void>;
   createId?: () => string;
   extractChatGpt(tabId: number): Promise<ExtractChatGptResponse>;
+  extractXiaohongshu(tabId: number): Promise<ExtractXiaohongshuResponse>;
   getActiveTab(): Promise<BrowserTab | null>;
   getApiClient(): Promise<CaptureApiClient>;
   getNotificationIconUrl(): string;
@@ -223,6 +225,7 @@ export function createBackgroundController(
   const screenshotRecoveryFlights = new Map<string, Promise<OutboxItem>>();
   const registry = createAdapterRegistry({
     extractChatGpt: (tabId) => dependencies.extractChatGpt(tabId),
+    extractXiaohongshu: (tabId) => dependencies.extractXiaohongshu(tabId),
   });
 
   async function synchronizeUiAndAlarm(
@@ -361,35 +364,40 @@ export function createBackgroundController(
   async function persistLocalTerminalCapture(input: {
     code: string;
     message: unknown;
-    originRef: string;
+    page: AdapterPageContext;
     runtimeMessage: Extract<
       RecallRuntimeMessage,
       { type: typeof CAPTURE_CURRENT_PAGE }
     >;
     tab: BrowserTab;
   }): Promise<OutboxItem> {
+    const isChatGpt = input.page.adapterId === "chatgpt";
     const failureReason = safeFailureReason(
       input.message,
-      "ChatGPT 页面内容暂时无法提取",
+      isChatGpt ? "ChatGPT 页面内容暂时无法提取" : "小红书页面内容暂时无法提取",
     );
     const currentTime = now();
     const queued = await dependencies.outbox.enqueue(
       {
         attachments: [],
         completeness: "partial",
-        externalRef: `${input.originRef}#${input.runtimeMessage.scope}:local-failure`,
+        externalRef: `${input.page.originRef}#${input.runtimeMessage.scope}:local-failure`,
         messages: [],
         missingElements: [failureReason],
-        originConversationRef: input.originRef,
+        originConversationRef: input.page.originRef,
         originTabId: input.tab.id,
         originUrl: input.tab.url,
         originWindowId: input.tab.windowId,
         pendingImages: [],
         rawText: "",
-        scope: input.runtimeMessage.scope as ChatGptCaptureScope,
+        scope: isChatGpt
+          ? (input.runtimeMessage.scope as ChatGptCaptureScope)
+          : "web_page",
         sensitivity: input.runtimeMessage.sensitivity,
-        source: "chatgpt_web",
-        title: "ChatGPT 采集异常",
+        ...(isChatGpt ? { source: "chatgpt_web" as const } : {}),
+        sourceKind: input.page.sourceKind,
+        sourcePlatform: input.page.sourcePlatform,
+        title: isChatGpt ? "ChatGPT 采集异常" : "小红书采集异常",
       },
       {
         now: currentTime,
@@ -488,7 +496,7 @@ export function createBackgroundController(
         return persistLocalTerminalCapture({
           code: "chatgpt_extraction_failed",
           message: error,
-          originRef: page.originRef,
+          page,
           runtimeMessage: message,
           tab,
         });
@@ -497,7 +505,7 @@ export function createBackgroundController(
         return persistLocalTerminalCapture({
           code: `chatgpt_${extracted.error.code}`,
           message: extracted.error.message,
-          originRef: page.originRef,
+          page,
           runtimeMessage: message,
           tab,
         });
@@ -515,21 +523,53 @@ export function createBackgroundController(
         return persistLocalTerminalCapture({
           code: "chatgpt_scope_failed",
           message: error,
-          originRef: page.originRef,
+          page,
           runtimeMessage: message,
           tab,
         });
       }
     } else {
-      const extracted = await adapter.extract(tab.id);
-      draft = adapter.toDraft({
-        extraction: extracted,
-        originTabId: tab.id,
-        originUrl: tab.url,
-        originWindowId: tab.windowId,
-        scope: message.scope,
-        sensitivity: message.sensitivity,
-      });
+      const xhsAdapter = adapter as SourceAdapter<ExtractXiaohongshuResponse>;
+      let extracted: ExtractXiaohongshuResponse;
+      try {
+        extracted = await xhsAdapter.extract(tab.id);
+      } catch (error) {
+        return persistLocalTerminalCapture({
+          code: "xiaohongshu_extraction_failed",
+          message: error,
+          page,
+          runtimeMessage: message,
+          tab,
+        });
+      }
+      if (!extracted.ok) {
+        return persistLocalTerminalCapture({
+          code: `xiaohongshu_${extracted.error.code}`,
+          message: extracted.error.message,
+          page,
+          runtimeMessage: message,
+          tab,
+        });
+      }
+      try {
+        draft = xhsAdapter.toDraft({
+          capturedAt: now().toISOString(),
+          extraction: extracted,
+          originTabId: tab.id,
+          originUrl: tab.url,
+          originWindowId: tab.windowId,
+          scope: message.scope,
+          sensitivity: message.sensitivity,
+        });
+      } catch (error) {
+        return persistLocalTerminalCapture({
+          code: "xiaohongshu_scope_failed",
+          message: error,
+          page,
+          runtimeMessage: message,
+          tab,
+        });
+      }
     }
     const queued = await dependencies.outbox.enqueue(draft, {
       now: now(),

@@ -48,7 +48,7 @@ describe("toXiaohongshuCaptureDraft", () => {
     expect(draft.sourceKind).toBe("social_post");
     expect(draft.sourcePlatform).toBe("xiaohongshu");
     expect(draft.scope).toBe("web_page");
-    expect(draft.metadata.adapterName).toBe("xiaohongshu");
+    expect(draft.metadata?.adapterName).toBe("xiaohongshu");
     expect(draft.pendingImages).toHaveLength(3);
   });
 

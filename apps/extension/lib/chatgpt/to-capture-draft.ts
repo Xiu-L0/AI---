@@ -90,7 +90,8 @@ function pendingImages(images: readonly ChatGptImage[]): PendingRemoteImage[] {
         alt: item.alt,
         clientId: `chatgpt-image-${item.messageOrdinal + 1}-${imageIndex}`,
         fileName: `chatgpt-image-${item.messageOrdinal + 1}-${imageIndex}.png`,
-        messageOrdinal: item.messageOrdinal,
+        missingLabel: `第 ${item.messageOrdinal + 1} 条消息中的图片无法读取`,
+        ordinal: item.messageOrdinal,
         sourceUrl: item.src,
       },
     ];
@@ -130,6 +131,8 @@ export function toChatGptCaptureDraft(input: ToCaptureDraftInput): CaptureDraft 
     scope: input.scope,
     sensitivity: input.sensitivity,
     source: "chatgpt_web",
+    sourceKind: "ai_conversation",
+    sourcePlatform: "chatgpt",
     title: scoped.title,
   };
 }

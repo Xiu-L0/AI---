@@ -1,8 +1,12 @@
 import {
   AttachmentMimeTypeSchema,
-  CapturedMessageSchema,
+  CaptureMetadataSchema,
   CaptureReceiptSchema,
+  CaptureSourceSchema,
+  CapturedMessageSchema,
   SensitivitySchema,
+  SourceKindSchema,
+  SourcePlatformSchema,
   UploadedAttachmentSchema,
   type CaptureReceipt,
 } from "@recall/contracts";
@@ -13,6 +17,7 @@ import type { AttachmentStore } from "./attachment-store";
 import {
   type CaptureDraft,
   isUnresolvedOutboxItem,
+  migratePendingImage,
   type OutboxItem,
 } from "./outbox-types";
 
@@ -52,11 +57,33 @@ const PendingRemoteImageSchema = z.object({
   alt: z.string().max(2_000),
   clientId: z.string().trim().min(1).max(100),
   fileName: z.string().trim().min(1).max(255),
-  messageOrdinal: z.number().int().nonnegative(),
+  missingLabel: z.string().trim().min(1).max(500),
+  ordinal: z.number().int().nonnegative(),
   sourceUrl: z.string().trim().min(1).max(10_000),
 });
 
-const CaptureDraftSchema: z.ZodType<CaptureDraft> = z.object({
+const CaptureDraftV2Schema: z.ZodType<CaptureDraft> = z.object({
+  attachments: z.array(StoredAttachmentSchema).max(50),
+  completeness: z.enum(["complete", "partial"]),
+  externalRef: z.string().trim().min(1).max(1_000),
+  messages: z.array(CapturedMessageSchema).max(5_000),
+  metadata: CaptureMetadataSchema.optional(),
+  missingElements: z.array(z.string().trim().min(1).max(500)).max(50),
+  originConversationRef: z.string().trim().min(1).max(1_000),
+  originTabId: z.number().int().nonnegative(),
+  originUrl: z.string().trim().min(1).max(10_000),
+  originWindowId: z.number().int().nonnegative(),
+  pendingImages: z.array(PendingRemoteImageSchema).max(5_000),
+  rawText: z.string(),
+  scope: z.enum(["full_conversation", "qa_pair", "selection", "web_page"]),
+  sensitivity: SensitivitySchema,
+  source: CaptureSourceSchema.optional(),
+  sourceKind: SourceKindSchema,
+  sourcePlatform: SourcePlatformSchema,
+  title: z.string().trim().min(1).max(500),
+});
+
+const CaptureDraftV1Schema = z.object({
   attachments: z.array(StoredAttachmentSchema).max(50),
   completeness: z.enum(["complete", "partial"]),
   externalRef: z.string().trim().min(1).max(1_000),
@@ -66,13 +93,37 @@ const CaptureDraftSchema: z.ZodType<CaptureDraft> = z.object({
   originTabId: z.number().int().nonnegative(),
   originUrl: z.string().trim().min(1).max(10_000),
   originWindowId: z.number().int().nonnegative(),
-  pendingImages: z.array(PendingRemoteImageSchema).max(5_000),
+  pendingImages: z
+    .array(
+      z.object({
+        alt: z.string().max(2_000),
+        clientId: z.string().trim().min(1).max(100),
+        fileName: z.string().trim().min(1).max(255),
+        messageOrdinal: z.number().int().nonnegative(),
+        sourceUrl: z.string().trim().min(1).max(10_000),
+      }),
+    )
+    .max(5_000),
   rawText: z.string(),
   scope: z.enum(["full_conversation", "qa_pair", "selection"]),
   sensitivity: SensitivitySchema,
   source: z.literal("chatgpt_web"),
   title: z.string().trim().min(1).max(500),
 });
+
+const CaptureDraftSchema = CaptureDraftV2Schema;
+
+function migrateV1Draft(
+  draft: z.infer<typeof CaptureDraftV1Schema>,
+): CaptureDraft {
+  return CaptureDraftV2Schema.parse({
+    ...draft,
+    pendingImages: draft.pendingImages.map(migratePendingImage),
+    source: "chatgpt_web",
+    sourceKind: "ai_conversation",
+    sourcePlatform: "chatgpt",
+  });
+}
 
 const TimestampSchema = z.iso.datetime({ offset: true });
 const NullableTimestampSchema = TimestampSchema.nullable();
@@ -99,7 +150,7 @@ const OutboxItemSchema: z.ZodType<OutboxItem> = z.object({
   recoveryOfItemId: z.string().trim().min(1).max(200).nullable(),
   resolvedAt: NullableTimestampSchema,
   resumeStage: z.enum(["preparing", "uploading", "finalizing"]),
-  schemaVersion: z.literal(1),
+  schemaVersion: z.union([z.literal(1), z.literal(2)]),
   state: z.enum([
     "pending",
     "uploading",
@@ -224,13 +275,33 @@ function parseItems(value: unknown): OutboxItem[] {
   if (value === undefined) {
     return [];
   }
-  const parsed = z.array(OutboxItemSchema).safeParse(value);
-  if (!parsed.success) {
-    throw new OutboxStorageError("Stored capture outbox is corrupt", {
-      cause: parsed.error,
-    });
+  if (!Array.isArray(value)) {
+    throw new OutboxStorageError("Stored capture outbox is corrupt");
   }
-  return parsed.data;
+  return value.map((row) => {
+    const migrated = migrateStoredRow(row);
+    const parsed = OutboxItemSchema.safeParse(migrated);
+    if (!parsed.success) {
+      throw new OutboxStorageError("Stored capture outbox is corrupt", {
+        cause: parsed.error,
+      });
+    }
+    return parsed.data;
+  });
+}
+
+function migrateStoredRow(row: unknown): unknown {
+  if (typeof row !== "object" || row === null) return row;
+  const record = row as { draft?: unknown; schemaVersion?: unknown };
+  const v1Draft = CaptureDraftV1Schema.safeParse(record.draft);
+  if (record.schemaVersion === 1 && v1Draft.success) {
+    return {
+      ...record,
+      draft: migrateV1Draft(v1Draft.data),
+      schemaVersion: 2,
+    };
+  }
+  return row;
 }
 
 async function readItems(storage: LocalStorageArea): Promise<OutboxItem[]> {
@@ -345,7 +416,7 @@ export async function enqueueDraft(
       recoveryOfItemId,
       resolvedAt: null,
       resumeStage: "preparing",
-      schemaVersion: 1,
+      schemaVersion: 2,
       state: "pending",
       supersededByItemId: null,
       updatedAt: now,
@@ -392,7 +463,7 @@ export async function mutateOutboxItem(
       ...candidate,
       createdAt: previous.createdAt,
       id: previous.id,
-      schemaVersion: 1,
+      schemaVersion: 2,
       updatedAt: now,
     });
     items[index] = updated;

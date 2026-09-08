@@ -84,20 +84,70 @@ export class RecallExtensionTestServer {
     const partial = readFileSync(
       resolve("tests/fixtures/chatgpt/conversation-with-missing-image.html"),
     );
+    const xhsComplete = readFileSync(
+      resolve("tests/fixtures/xiaohongshu/complete-note.html"),
+      "utf8",
+    );
+    const xhsPartial = readFileSync(
+      resolve("tests/fixtures/xiaohongshu/partial-note.html"),
+      "utf8",
+    );
     const generatedPng = Buffer.from(
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
       "base64",
     );
 
+    function rewriteXiaohongshuImages(html: string): string {
+      return html
+        .replaceAll(
+          "https://sns-webpic-qc.xhscdn.com/fixture/cover.png",
+          `${fixtureOrigin}/xhs/cover.png`,
+        )
+        .replaceAll(
+          "https://sns-webpic-qc.xhscdn.com/fixture/detail-1.png",
+          `${fixtureOrigin}/xhs/detail-1.png`,
+        )
+        .replaceAll(
+          "https://sns-webpic-qc.xhscdn.com/fixture/detail-2.png",
+          `${fixtureOrigin}/xhs/detail-2.png`,
+        )
+        .replaceAll(
+          "https://sns-webpic-qc.xhscdn.com/fixture/missing.png",
+          `${fixtureOrigin}/xhs/missing.png`,
+        );
+    }
+
     this.fixtureServer = createServer((request, response) => {
       const url = new URL(request.url ?? "/", fixtureOrigin);
-      if (url.pathname === "/generated-fixture.png") {
+      if (url.pathname === "/generated-fixture.png" || /^\/xhs\/(?!missing\.png$).+\.png$/.test(url.pathname)) {
         response.writeHead(200, {
           "cache-control": "no-store",
           "content-length": generatedPng.byteLength,
           "content-type": "image/png",
         });
         response.end(generatedPng);
+        return;
+      }
+      if (url.pathname === "/xhs/missing.png") {
+        response.writeHead(403, { "content-type": "text/plain; charset=utf-8" });
+        response.end("Synthetic image denied");
+        return;
+      }
+      if (url.pathname === "/unsupported") {
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        response.end(
+          "<!doctype html><html lang=\"zh-CN\"><body><h1>不受支持的合成页面</h1></body></html>",
+        );
+        return;
+      }
+      if (/^\/explore\/missing-[A-Za-z0-9_-]+$/.test(url.pathname)) {
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        response.end(rewriteXiaohongshuImages(xhsPartial));
+        return;
+      }
+      if (/^\/explore\/[A-Za-z0-9_-]+$/.test(url.pathname)) {
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        response.end(rewriteXiaohongshuImages(xhsComplete));
         return;
       }
       if (/^\/c\/missing-[A-Za-z0-9_-]+$/.test(url.pathname)) {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { hostPermission, optionalTestHostPermission } from "./wxt.config";
+import { FIXED_HOST_PERMISSIONS, hostPermission, optionalTestHostPermission } from "./wxt.config";
 
 const variableName = "WXT_TEST_SECURE_ORIGIN";
 const testBuildName = "WXT_TEST_BUILD_FOR_CONFIG_TEST";
@@ -54,5 +54,14 @@ describe("extension host permissions", () => {
     expect(() => optionalTestHostPermission(variableName, testBuildName)).toThrow(
       "is required",
     );
+  });
+
+  it("lists exact ChatGPT, Xiaohongshu and CDN hosts without all_urls", () => {
+    expect(FIXED_HOST_PERMISSIONS).toEqual([
+      "https://chatgpt.com/*",
+      "https://www.xiaohongshu.com/*",
+      "https://*.xhscdn.com/*",
+    ]);
+    expect(FIXED_HOST_PERMISSIONS.join(" ")).not.toContain("<all_urls>");
   });
 });

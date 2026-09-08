@@ -92,7 +92,7 @@ describe("toChatGptCaptureDraft", () => {
 
     expect(draft.pendingImages).toEqual([
       expect.objectContaining({
-        messageOrdinal: 3,
+        ordinal: 3,
         sourceUrl: "https://images.example.test/result.png",
       }),
     ]);

@@ -62,6 +62,24 @@ export function xiaohongshuNoteId(
   return decodeNoteId(match[1]);
 }
 
+export function isAllowedXiaohongshuImageUrl(
+  value: string,
+  configured = import.meta.env.WXT_TEST_FIXTURE_ORIGIN,
+  testBuild = import.meta.env.WXT_TEST_BUILD === "1",
+): boolean {
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > 10_000) return false;
+  if (/^data:image\//i.test(trimmed)) return true;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol === "https:") return true;
+    const fixtureOrigin = testFixtureOrigin(configured, testBuild);
+    return fixtureOrigin !== null && url.origin === fixtureOrigin;
+  } catch {
+    return false;
+  }
+}
+
 export function xiaohongshuCanonicalUrl(
   value: string,
   configured = import.meta.env.WXT_TEST_FIXTURE_ORIGIN,

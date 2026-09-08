@@ -42,6 +42,12 @@ export function optionalTestHostPermission(
   return [hostPermission(name, configured)];
 }
 
+export const FIXED_HOST_PERMISSIONS = [
+  "https://chatgpt.com/*",
+  "https://www.xiaohongshu.com/*",
+  "https://*.xhscdn.com/*",
+] as const;
+
 export default defineConfig({
   manifestVersion: 3,
   modules: ["@wxt-dev/module-react"],
@@ -58,7 +64,7 @@ export default defineConfig({
       "alarms",
     ],
     host_permissions: [
-      "https://chatgpt.com/*",
+      ...FIXED_HOST_PERMISSIONS,
       hostPermission("WXT_PUBLIC_API_ORIGIN", "http://localhost:3000"),
       hostPermission("WXT_PUBLIC_SUPABASE_URL", "http://127.0.0.1:55321"),
       ...optionalTestHostPermission("WXT_TEST_FIXTURE_ORIGIN"),

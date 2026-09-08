@@ -89,7 +89,10 @@ export type CaptureRunnerOutbox = {
 export type CaptureRunnerDependencies = {
   attachmentStore: Pick<AttachmentStore, "getAttachment" | "putAttachment">;
   blockedImageOrigins?: readonly string[];
+  captureVisibleTab?(windowId: number): Promise<string>;
+  createId?: () => string;
   fetch?: typeof globalThis.fetch;
+  focusTab?(tabId: number): Promise<void>;
   getApiClient(): Promise<CaptureApiClient>;
   now?: () => Date;
   outbox: CaptureRunnerOutbox;
@@ -251,6 +254,26 @@ function safeRemoteImageUrl(
   return url;
 }
 
+function dataUrlPngBlob(value: string): Blob {
+  if (!value.startsWith("data:image/png")) {
+    throw new Error("浏览器截图没有返回 image/png 数据");
+  }
+  const comma = value.indexOf(",");
+  if (comma < 0) {
+    throw new Error("浏览器截图返回了无效的 PNG 数据");
+  }
+  const binary = atob(value.slice(comma + 1));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  const blob = new Blob([bytes], { type: "image/png" });
+  if (blob.size === 0) {
+    throw new Error("浏览器截图返回了无效的 PNG 数据");
+  }
+  return blob;
+}
+
 async function blobBytes(blob: Blob): Promise<ArrayBuffer> {
   if ("arrayBuffer" in blob && typeof blob.arrayBuffer === "function") {
     return blob.arrayBuffer();
@@ -306,11 +329,11 @@ async function hasExpectedImageSignature(
   );
 }
 
-function missingImageDescription(messageOrdinal: number, reason: string): string {
-  return `第 ${messageOrdinal + 1} 条消息中的图片无法保存：${reason}`.slice(
-    0,
-    500,
-  );
+function missingImageDescription(image: {
+  missingLabel: string;
+  ordinal: number;
+}, reason: string): string {
+  return `${image.missingLabel}：${reason}`.slice(0, 500);
 }
 
 async function startInput(
@@ -342,21 +365,27 @@ async function startInput(
     ),
     externalRef: item.draft.externalRef,
     idempotencyKey: item.idempotencyKey,
+    ...(item.draft.metadata === undefined
+      ? {}
+      : { metadata: item.draft.metadata }),
     ...(recoveryCaptureId === null ? {} : { recoveryCaptureId }),
     scope: item.draft.scope,
     sensitivity: item.draft.sensitivity,
-    source: item.draft.source,
+    ...(item.draft.source === undefined ? {} : { source: item.draft.source }),
+    sourceKind: item.draft.sourceKind,
+    sourcePlatform: item.draft.sourcePlatform,
     title: item.draft.title,
   };
 }
 
 function finalizedInput(item: OutboxItem) {
+  const hasMessages = item.draft.messages.length > 0;
   return {
     completeness: item.draft.completeness,
     idempotencyKey: item.idempotencyKey,
     messages: item.draft.messages,
     missingElements: item.draft.missingElements,
-    rawText: "",
+    rawText: hasMessages ? "" : item.draft.rawText,
     uploadedAttachments: item.uploadedAttachments,
   } as const;
 }
@@ -408,6 +437,7 @@ async function prepareAttachments(
     nextMissing.push(`${omittedCount} 张图片因单次最多 50 个附件而未保存`);
   }
 
+  let hadNonRetryableImageFailure = false;
   for (const image of pending) {
     try {
       const sourceUrl = safeRemoteImageUrl(image.sourceUrl, blockedOrigins);
@@ -415,16 +445,23 @@ async function prepareAttachments(
       try {
         response = await fetcher(sourceUrl, {
           credentials: "omit",
-          redirect: "manual",
+          redirect: "follow",
         });
       } catch {
         throw new RetryableImageFetchError("图片下载暂时失败");
       }
+      const finalUrlValue = response.url.length > 0 ? response.url : sourceUrl.href;
+      const finalUrl = safeRemoteImageUrl(finalUrlValue, blockedOrigins);
       if (
-        response.type === "opaqueredirect" ||
-        (response.status >= 300 && response.status < 400)
+        finalUrl.protocol !== "https:" &&
+        finalUrl.protocol !== "data:" &&
+        finalUrl.origin !== testFixtureOrigin() &&
+        !(
+          finalUrl.protocol === "http:" &&
+          (finalUrl.hostname === "127.0.0.1" || finalUrl.hostname === "localhost")
+        )
       ) {
-        throw new Error("图片重定向未被允许");
+        throw new Error("图片重定向到了非 HTTPS 地址");
       }
       if (!response.ok) {
         if (
@@ -473,8 +510,66 @@ async function prepareAttachments(
       totalBytes += blob.size;
     } catch (error) {
       if (error instanceof RetryableImageFetchError) throw error;
+      hadNonRetryableImageFailure = true;
       nextMissing.push(
-        missingImageDescription(image.messageOrdinal, readableError(error)),
+        missingImageDescription(image, readableError(error)),
+      );
+    }
+  }
+
+  if (
+    item.draft.sourcePlatform === "xiaohongshu" &&
+    hadNonRetryableImageFailure &&
+    dependencies.captureVisibleTab !== undefined &&
+    nextAttachments.length < MAX_ATTACHMENT_COUNT
+  ) {
+    try {
+      await dependencies.focusTab?.(item.draft.originTabId);
+      const screenshot = dataUrlPngBlob(
+        await dependencies.captureVisibleTab(item.draft.originWindowId),
+      );
+      if (
+        screenshot.size > 0 &&
+        screenshot.size <= MAX_ATTACHMENT_BYTES &&
+        totalBytes + screenshot.size <= MAX_TOTAL_ATTACHMENT_BYTES
+      ) {
+        const id = dependencies.createId?.() ?? crypto.randomUUID();
+        const hash = await sha256(screenshot);
+        const clientId = `xhs-fallback-${id}`.slice(0, 100);
+        const blobKey = `${item.id}:${clientId}:${hash.slice(0, 16)}`;
+        await dependencies.attachmentStore.putAttachment(blobKey, screenshot);
+        nextAttachments.push({
+          blobKey,
+          byteSize: screenshot.size,
+          clientId,
+          fileName: `xhs-fallback-${id}.png`.slice(0, 255),
+          mimeType: "image/png",
+          sha256: hash,
+        });
+        const metadata = item.draft.metadata;
+        if (metadata) {
+          item = {
+            ...item,
+            draft: {
+              ...item.draft,
+              metadata: {
+                ...metadata,
+                assets: [
+                  ...metadata.assets,
+                  {
+                    alt: "页面截图（补充证据，不是原图）",
+                    clientId,
+                    ordinal: metadata.assets.length,
+                  },
+                ],
+              },
+            },
+          };
+        }
+      }
+    } catch (error) {
+      nextMissing.push(
+        `页面截图未能作为补充证据保存：${readableError(error)}`.slice(0, 500),
       );
     }
   }
@@ -489,6 +584,9 @@ async function prepareAttachments(
         ...current.draft,
         attachments: nextAttachments,
         completeness: missingElements.length === 0 ? "complete" : "partial",
+        ...(item.draft.metadata === undefined
+          ? {}
+          : { metadata: item.draft.metadata }),
         missingElements,
         pendingImages: [],
       },

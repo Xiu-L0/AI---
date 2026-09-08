@@ -38,7 +38,9 @@ type PopupCaptureScope = Extract<
 >;
 
 export type PageContext = {
+  adapterId?: "chatgpt" | "xiaohongshu";
   label: string;
+  originRef?: string;
   supported: boolean;
   scopes: PopupCaptureScope[];
 };
@@ -78,7 +80,9 @@ export function pageContextForUrl(urlValue: string | undefined): PageContext {
     return { label: "当前页面暂不支持自动采集", scopes: [], supported: false };
   }
   return {
+    adapterId: page.adapterId,
     label: page.label,
+    originRef: page.originRef,
     scopes: page.scopes.filter(
       (scope): scope is PopupCaptureScope =>
         scope === "full_conversation" ||
@@ -342,9 +346,18 @@ export function App({ services = defaultServices }: { services?: PopupServices }
   const pageSupported = context?.supported === true;
   const selectedUnresolved =
     currentItem !== null && isUnresolvedOutboxItem(currentItem);
+  const receiptMatchesCurrentPage =
+    currentItem !== null &&
+    context?.originRef !== undefined &&
+    currentItem.draft.originConversationRef === context.originRef;
   const showHistoricalResult = pageSupported || selectedUnresolved;
   const visibleState = showHistoricalResult ? state : "ready";
-  const visibleReceipt = showHistoricalResult ? receipt : null;
+  const visibleReceipt =
+    showHistoricalResult && (selectedUnresolved || receiptMatchesCurrentPage)
+      ? receipt
+      : null;
+  const isXiaohongshuResult =
+    currentItem?.draft.sourcePlatform === "xiaohongshu";
   const unresolved = useMemo(
     () => unresolvedItems(outboxItems),
     [outboxItems],
@@ -584,7 +597,11 @@ export function App({ services = defaultServices }: { services?: PopupServices }
 
       {visibleState === "complete" && visibleReceipt && (
         <section>
-          <h2>完整采集成功</h2>
+          <h2>
+            {isXiaohongshuResult
+              ? "完整采集成功，图片识别已排队"
+              : "完整采集成功"}
+          </h2>
           <p>
             已保存 {visibleReceipt.savedMessageCount} 条消息、
             {visibleReceipt.savedAttachmentCount} 个附件
@@ -594,7 +611,11 @@ export function App({ services = defaultServices }: { services?: PopupServices }
 
       {visibleState === "partial" && visibleReceipt && currentItem && (
         <section>
-          <h2>部分内容未采集</h2>
+          <h2>
+            {isXiaohongshuResult
+              ? "部分采集成功，已保存可用内容；请查看缺失项"
+              : "部分内容未采集"}
+          </h2>
           <ul>
             {visibleReceipt.missingElements.map((item) => (
               <li key={item}>{item}</li>
@@ -653,7 +674,11 @@ export function App({ services = defaultServices }: { services?: PopupServices }
 
       {visibleState === "terminal" && currentItem && (
         <section>
-          <h2>采集无法自动恢复，需要重新采集</h2>
+          <h2>
+            {isXiaohongshuResult
+              ? "采集失败，原始内容仍保留在扩展待处理列表"
+              : "采集无法自动恢复，需要重新采集"}
+          </h2>
           {currentItem.lastError && <p>{currentItem.lastError}</p>}
           {context?.supported && (
             <button

@@ -1,10 +1,12 @@
 import type { ExtractChatGptResponse } from "../chatgpt/content-message";
+import type { ExtractXiaohongshuResponse } from "../xiaohongshu/content-message";
 import { createChatGptAdapter } from "./chatgpt";
 import type { SourceAdapter } from "./types";
 import { createXiaohongshuAdapter } from "./xiaohongshu";
 
 export type AdapterRegistryDependencies = {
   extractChatGpt(tabId: number): Promise<ExtractChatGptResponse>;
+  extractXiaohongshu(tabId: number): Promise<ExtractXiaohongshuResponse>;
 };
 
 export function createAdapterRegistry(
@@ -14,7 +16,9 @@ export function createAdapterRegistry(
 } {
   const adapters: SourceAdapter[] = [
     createChatGptAdapter({ extractChatGpt: dependencies.extractChatGpt }),
-    createXiaohongshuAdapter(),
+    createXiaohongshuAdapter({
+      extractXiaohongshu: dependencies.extractXiaohongshu,
+    }),
   ];
 
   return {
@@ -33,6 +37,9 @@ export function createAdapterRegistry(
 const MATCH_ONLY_REGISTRY = createAdapterRegistry({
   async extractChatGpt() {
     throw new Error("ChatGPT extractor is not bound");
+  },
+  async extractXiaohongshu() {
+    throw new Error("Xiaohongshu extractor is not bound");
   },
 });
 

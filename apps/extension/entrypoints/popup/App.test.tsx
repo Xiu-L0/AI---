@@ -42,6 +42,8 @@ function outboxItem(overrides: Partial<OutboxItem> = {}): OutboxItem {
       scope: "full_conversation",
       sensitivity: "normal",
       source: "chatgpt_web",
+      sourceKind: "ai_conversation",
+      sourcePlatform: "chatgpt",
       title: "Synthetic conversation",
     },
     errorCode: null,
@@ -70,7 +72,9 @@ function services(overrides: Partial<PopupServices> = {}): PopupServices {
     saveCredential: vi.fn(async () => undefined),
     exchangePairing: vi.fn(async () => credential),
     getPageContext: vi.fn(async () => ({
+      adapterId: "chatgpt" as const,
       label: "ChatGPT 网页版",
+      originRef: "conversation-1",
       supported: true,
       scopes: ["full_conversation" as const],
     })),
@@ -98,7 +102,7 @@ describe("extension popup", () => {
   });
 
   it("recognizes Xiaohongshu notes and rejects look-alike hosts", () => {
-    expect(pageContextForUrl("https://www.xiaohongshu.com/explore/abc")).toEqual({
+    expect(pageContextForUrl("https://www.xiaohongshu.com/explore/abc")).toMatchObject({
       label: "小红书网页版",
       scopes: ["web_page"],
       supported: true,
@@ -517,6 +521,124 @@ describe("extension popup", () => {
     expect(
       screen.queryByRole("button", { name: "立即重试" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("shows Xiaohongshu receipt copy and only the whole-note scope", async () => {
+    const complete = outboxItem({
+      draft: {
+        ...outboxItem().draft,
+        originConversationRef: "65abc123",
+        originUrl: "https://www.xiaohongshu.com/explore/65abc123",
+        scope: "web_page",
+        sourceKind: "social_post",
+        sourcePlatform: "xiaohongshu",
+        title: "合成标题",
+      },
+    });
+    const { source: _legacySource, ...typedDraft } = complete.draft;
+    render(
+      <App
+        services={services({
+          getCredential: vi.fn(async () => credential),
+          getPageContext: vi.fn(async () => ({
+            adapterId: "xiaohongshu" as const,
+            label: "小红书网页版",
+            originRef: "65abc123",
+            scopes: ["web_page" as const],
+            supported: true,
+          })),
+          listOutbox: vi.fn(async () => [
+            { ...complete, draft: typedDraft },
+          ]),
+          refresh: vi.fn(async () => ({ ...complete, draft: typedDraft })),
+        })}
+      />,
+    );
+
+    expect(await screen.findByText("当前来源：小红书网页版")).toBeVisible();
+    expect(screen.getByLabelText("保存范围")).toHaveDisplayValue("整篇笔记");
+    expect(
+      screen.getByRole("heading", { name: "完整采集成功，图片识别已排队" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("heading", { name: /^完整采集成功$/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not show a prior ChatGPT receipt as the current Xiaohongshu result", async () => {
+    const chatgptComplete = outboxItem();
+    render(
+      <App
+        services={services({
+          getCredential: vi.fn(async () => credential),
+          getPageContext: vi.fn(async () => ({
+            adapterId: "xiaohongshu" as const,
+            label: "小红书网页版",
+            originRef: "65abc123",
+            scopes: ["web_page" as const],
+            supported: true,
+          })),
+          listOutbox: vi.fn(async () => [chatgptComplete]),
+          refresh: vi.fn(async () => chatgptComplete),
+        })}
+      />,
+    );
+
+    expect(await screen.findByText("当前来源：小红书网页版")).toBeVisible();
+    expect(screen.getByLabelText("保存范围")).toHaveDisplayValue("整篇笔记");
+    expect(screen.getByRole("button", { name: "保存到 Recall AI" })).toBeVisible();
+    expect(screen.queryByText("完整采集成功")).not.toBeInTheDocument();
+    expect(screen.queryByText(/已保存 4 条消息/)).not.toBeInTheDocument();
+  });
+
+  it("shows Xiaohongshu partial copy without promoting it to complete", async () => {
+    const partial = outboxItem({
+      draft: {
+        ...outboxItem().draft,
+        completeness: "partial",
+        missingElements: ["第 2 张图片无法读取：HTTP 403"],
+        originConversationRef: "65abc123",
+        originUrl: "https://www.xiaohongshu.com/explore/65abc123",
+        scope: "web_page",
+        sourceKind: "social_post",
+        sourcePlatform: "xiaohongshu",
+        title: "部分可读的合成笔记",
+      },
+      receipt: {
+        ...outboxItem().receipt!,
+        captureStatus: "partial",
+        missingElements: ["第 2 张图片无法读取：HTTP 403"],
+        savedAttachmentCount: 2,
+        savedMessageCount: 0,
+      },
+      resolvedAt: null,
+      state: "partial",
+    });
+    const { source: _legacySource, ...typedDraft } = partial.draft;
+    render(
+      <App
+        services={services({
+          getCredential: vi.fn(async () => credential),
+          getPageContext: vi.fn(async () => ({
+            adapterId: "xiaohongshu" as const,
+            label: "小红书网页版",
+            originRef: "65abc123",
+            scopes: ["web_page" as const],
+            supported: true,
+          })),
+          listOutbox: vi.fn(async () => [{ ...partial, draft: typedDraft }]),
+          refresh: vi.fn(async () => ({ ...partial, draft: typedDraft })),
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "部分采集成功，已保存可用内容；请查看缺失项",
+      }),
+    ).toBeVisible();
+    expect(screen.getByText("第 2 张图片无法读取：HTTP 403")).toBeVisible();
+    expect(screen.queryByText("完整采集成功")).not.toBeInTheDocument();
   });
 
   it("does not stay loading when extension state cannot be read", async () => {

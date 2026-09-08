@@ -46,6 +46,8 @@ function draft(overrides: Partial<CaptureDraft> = {}): CaptureDraft {
     scope: "full_conversation",
     sensitivity: "normal",
     source: "chatgpt_web",
+    sourceKind: "ai_conversation",
+    sourcePlatform: "chatgpt",
     title: "Synthetic conversation",
     ...overrides,
   };
@@ -99,7 +101,8 @@ describe("capture outbox", () => {
       alt: `Synthetic ${index}`,
       clientId: `image-${index}`,
       fileName: `image-${index}.png`,
-      messageOrdinal: 0,
+      missingLabel: `第 1 条消息中的图片无法读取`,
+      ordinal: 0,
       sourceUrl: `https://images.example.test/${index}.png`,
     }));
 
@@ -439,5 +442,104 @@ describe("capture outbox", () => {
     await expect(
       listOutbox({ storage: fakeBrowser.storage.local }),
     ).rejects.toThrow("Stored capture outbox is corrupt");
+  });
+
+  it("migrates a stored schema v1 ChatGPT item to v2 without losing identity", async () => {
+    const v1Item = {
+      attachmentsPrepared: false,
+      attemptCount: 2,
+      captureId: null,
+      createdAt: NOW.toISOString(),
+      draft: {
+        attachments: [
+          {
+            blobKey: "blob-1",
+            byteSize: 12,
+            clientId: "image-1",
+            fileName: "image-1.png",
+            mimeType: "image/png" as const,
+            sha256: "a".repeat(64),
+          },
+        ],
+        completeness: "partial" as const,
+        externalRef: "synthetic-conversation",
+        messages: [
+          {
+            externalMessageId: "message-1",
+            ordinal: 0,
+            role: "user" as const,
+            text: "Synthetic question",
+          },
+        ],
+        missingElements: ["missing image"],
+        originConversationRef: "synthetic-conversation",
+        originTabId: 12,
+        originUrl: "https://chatgpt.com/c/synthetic-conversation",
+        originWindowId: 8,
+        pendingImages: [
+          {
+            alt: "fixture",
+            clientId: "pending-1",
+            fileName: "pending-1.png",
+            messageOrdinal: 3,
+            sourceUrl: "https://images.example.test/1.png",
+          },
+        ],
+        rawText: "Synthetic question",
+        scope: "full_conversation" as const,
+        sensitivity: "normal" as const,
+        source: "chatgpt_web" as const,
+        title: "Synthetic conversation",
+      },
+      errorCode: null,
+      id: "legacy-1",
+      idempotencyKey: "idempotency-legacy-1",
+      lastError: null,
+      lastNotifiedAttemptCount: 0,
+      nextAttemptAt: NOW.toISOString(),
+      receipt: null,
+      receiptStoredAt: null,
+      recoveryOfItemId: "legacy-root",
+      resolvedAt: null,
+      resumeStage: "preparing" as const,
+      schemaVersion: 1 as const,
+      state: "pending" as const,
+      supersededByItemId: null,
+      updatedAt: NOW.toISOString(),
+      uploadedAttachments: [],
+    };
+    await enqueueDraft(draft(), {
+      ...options(),
+      createId: () => "legacy-root",
+      createIdempotencyKey: () => "idempotency-legacy-root",
+    });
+    const stored = await fakeBrowser.storage.local.get(OUTBOX_STORAGE_KEY);
+    const existing = stored[OUTBOX_STORAGE_KEY] as unknown[];
+    await fakeBrowser.storage.local.set({
+      [OUTBOX_STORAGE_KEY]: [...existing, v1Item],
+    });
+
+    const items = await listOutbox({ storage: fakeBrowser.storage.local });
+    const migrated = items.find((item) => item.id === "legacy-1");
+    expect(migrated?.schemaVersion).toBe(2);
+    expect(migrated?.idempotencyKey).toBe("idempotency-legacy-1");
+    expect(migrated?.recoveryOfItemId).toBe("legacy-root");
+    expect(migrated?.draft.sourceKind).toBe("ai_conversation");
+    expect(migrated?.draft.sourcePlatform).toBe("chatgpt");
+    expect(migrated?.draft.pendingImages[0]).toMatchObject({
+      ordinal: 3,
+      missingLabel: "第 4 条消息中的图片无法读取",
+    });
+    expect(migrated?.draft.attachments).toHaveLength(1);
+
+    await mutateOutboxItem(
+      "legacy-1",
+      (item) => item,
+      { now: NOW, storage: fakeBrowser.storage.local },
+    );
+    const persisted = await listOutbox({ storage: fakeBrowser.storage.local });
+    expect(persisted.find((item) => item.id === "legacy-1")?.schemaVersion).toBe(
+      2,
+    );
   });
 });

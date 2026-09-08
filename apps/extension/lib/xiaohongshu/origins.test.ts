@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isAllowedXiaohongshuImageUrl,
   isSupportedXiaohongshuUrl,
   xiaohongshuCanonicalUrl,
   xiaohongshuMatchPatterns,
@@ -40,5 +41,23 @@ describe("Xiaohongshu origins", () => {
     expect(
       xiaohongshuNoteId("https://xiaohongshu.com/explore/65abc123"),
     ).toBeNull();
+  });
+
+  it("allows HTTPS CDN images and test-fixture loopback images only", () => {
+    expect(
+      isAllowedXiaohongshuImageUrl(
+        "https://sns-webpic-qc.xhscdn.com/fixture/cover.png",
+      ),
+    ).toBe(true);
+    expect(
+      isAllowedXiaohongshuImageUrl("http://127.0.0.1:41739/xhs/cover.png"),
+    ).toBe(false);
+    expect(
+      isAllowedXiaohongshuImageUrl(
+        "http://127.0.0.1:41739/xhs/cover.png",
+        "http://127.0.0.1:41739",
+        true,
+      ),
+    ).toBe(true);
   });
 });

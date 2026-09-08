@@ -1,36 +1,17 @@
-import type { CaptureMetadata, Sensitivity } from "@recall/contracts";
+import type { Sensitivity } from "@recall/contracts";
 
+import type { CaptureDraft, PendingRemoteImage } from "../outbox-types";
 import type { XiaohongshuExtraction, XiaohongshuImage } from "./extract";
+import { isAllowedXiaohongshuImageUrl } from "./origins";
 
 export const XIAOHONGSHU_ADAPTER_VERSION = "1";
 
-export type XiaohongshuPendingImage = {
-  alt: string;
-  clientId: string;
-  fileName: string;
-  missingLabel: string;
-  ordinal: number;
-  sourceUrl: string;
-};
+export type XiaohongshuPendingImage = PendingRemoteImage;
 
-export type XiaohongshuCaptureDraft = {
-  attachments: [];
-  completeness: "complete" | "partial";
-  externalRef: string;
-  messages: [];
-  metadata: CaptureMetadata;
-  missingElements: string[];
-  originConversationRef: string;
-  originTabId: number;
-  originUrl: string;
-  originWindowId: number;
-  pendingImages: XiaohongshuPendingImage[];
-  rawText: string;
+export type XiaohongshuCaptureDraft = CaptureDraft & {
   scope: "web_page";
-  sensitivity: Sensitivity;
   sourceKind: "social_post";
   sourcePlatform: "xiaohongshu";
-  title: string;
 };
 
 export type ToXiaohongshuCaptureDraftInput = {
@@ -43,11 +24,7 @@ export type ToXiaohongshuCaptureDraftInput = {
 };
 
 function imageSourceIsReadable(source: string | null): source is string {
-  return (
-    source !== null &&
-    source.length <= 10_000 &&
-    /^(https:|data:image\/)/i.test(source)
-  );
+  return source !== null && isAllowedXiaohongshuImageUrl(source);
 }
 
 function missingElements(extraction: XiaohongshuExtraction): string[] {
