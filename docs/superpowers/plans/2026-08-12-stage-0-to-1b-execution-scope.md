@@ -125,10 +125,10 @@
 
 | 延期能力 | 目标阶段/触发条件 | 当前处理 |
 | --- | --- | --- |
-| Claude、豆包、DeepSeek 网页版对话采集 | Stage 2A | 不创建适配器或占位 UI |
+| 豆包、DeepSeek 网页版对话采集 | Stage 2A | 不创建适配器或占位 UI；Claude 已于 2026-09-08 移出后续范围 |
 | 普通网页、微信文章、GitHub 仓库采集 | Stage 2B | 不创建解析服务 |
 | PDF、Office 文件内容解析 | Stage 2B 或独立文件解析计划 | 保留现有原文件上传能力 |
-| 小红书正文、图片、腾讯 OCR、GLM 多模态 | Stage 2C | 不绕过平台限制，不提前接 OCR |
+| 小红书正文、图片、GLM-OCR API | Stage 2C | 不绕过平台限制，不提前接 OCR |
 | `topics`、`topic_memberships` | Stage 4 | Stage 1A 不建空表 |
 | `knowledge_edges` 和正式知识图谱 | Stage 4 | Stage 1B 不生成关系图 |
 | Embedding、`pgvector`、混合检索和重排 | Stage 3 | Stage 1B 仅保留基础来源/知识浏览 |
