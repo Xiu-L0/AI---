@@ -9,6 +9,11 @@ export type WorkerConfig = {
   deepseekApiKey: string;
   deepseekBaseUrl: string;
   deepseekModel: DeepseekModel;
+  zhipuApiKey: string;
+  glmOcrBaseUrl: string;
+  glmOcrModel: "glm-ocr";
+  glmOcrTimeoutMs: number;
+  allowSensitiveExternalAi: boolean;
   workerId: string;
   pollIntervalMs: number;
   leaseSeconds: number;
@@ -44,6 +49,36 @@ function readBoundedInteger(
   const value = raw === undefined || raw === "" ? fallback : Number(raw);
   if (!Number.isInteger(value) || value < min || value > max) {
     throw new WorkerConfigError(`${name} must be an integer between ${min} and ${max}`);
+  }
+  return value;
+}
+
+function isLoopbackHostname(hostname: string) {
+  const host = hostname.trim().toLowerCase().replace(/^\[|\]$/g, "");
+  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "0.0.0.0";
+}
+
+function readBooleanFlag(
+  env: Record<string, string | undefined>,
+  name: string,
+  fallback: boolean,
+) {
+  const raw = env[name]?.trim();
+  if (raw === undefined || raw === "") return fallback;
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  throw new WorkerConfigError(`${name} must be true or false`);
+}
+
+function readHttpsPublicUrl(
+  env: Record<string, string | undefined>,
+  name: string,
+  fallback: string,
+) {
+  const value = readHttpUrl(env, name, fallback);
+  const parsed = new URL(value);
+  if (parsed.protocol !== "https:" || isLoopbackHostname(parsed.hostname)) {
+    throw new WorkerConfigError(`${name} must be a public HTTPS URL`);
   }
   return value;
 }
@@ -87,6 +122,11 @@ export function loadWorkerConfig(
     );
   }
 
+  const glmOcrModel = env.GLM_OCR_MODEL?.trim() || "glm-ocr";
+  if (glmOcrModel !== "glm-ocr") {
+    throw new WorkerConfigError("GLM_OCR_MODEL must be glm-ocr");
+  }
+
   const workerId = env.WORKER_ID?.trim() || "recall-worker";
   if (workerId.length < 1 || workerId.length > 200) {
     throw new WorkerConfigError("WORKER_ID must be between 1 and 200 characters");
@@ -102,6 +142,15 @@ export function loadWorkerConfig(
       "https://api.deepseek.com",
     ),
     deepseekModel: deepseekModel as DeepseekModel,
+    zhipuApiKey: readRequiredSecret(env, "ZHIPU_API_KEY"),
+    glmOcrBaseUrl: readHttpsPublicUrl(
+      env,
+      "GLM_OCR_BASE_URL",
+      "https://open.bigmodel.cn/api/paas/v4",
+    ),
+    glmOcrModel: "glm-ocr",
+    glmOcrTimeoutMs: readBoundedInteger(env, "GLM_OCR_TIMEOUT_MS", 60_000, 5_000, 120_000),
+    allowSensitiveExternalAi: readBooleanFlag(env, "ALLOW_SENSITIVE_EXTERNAL_AI", false),
     workerId,
     pollIntervalMs: readBoundedInteger(env, "WORKER_POLL_INTERVAL_MS", 2000, 200, 60_000),
     leaseSeconds: readBoundedInteger(env, "WORKER_LEASE_SECONDS", 60, 10, 3600),

@@ -9,6 +9,7 @@ function validEnv(
     SUPABASE_URL: "http://127.0.0.1:55321",
     SUPABASE_SERVICE_ROLE_KEY: "test-service-role",
     DEEPSEEK_API_KEY: "test-deepseek-key",
+    ZHIPU_API_KEY: "test-zhipu-key-not-for-git",
     ...overrides,
   };
 }
@@ -20,6 +21,11 @@ describe("loadWorkerConfig", () => {
     expect(config.supabaseUrl).toBe("http://127.0.0.1:55321");
     expect(config.supabaseServiceRoleKey).toBe("test-service-role");
     expect(config.deepseekApiKey).toBe("test-deepseek-key");
+    expect(config.zhipuApiKey).toBe("test-zhipu-key-not-for-git");
+    expect(config.glmOcrBaseUrl).toBe("https://open.bigmodel.cn/api/paas/v4");
+    expect(config.glmOcrModel).toBe("glm-ocr");
+    expect(config.glmOcrTimeoutMs).toBe(60_000);
+    expect(config.allowSensitiveExternalAi).toBe(false);
   });
 
   it("uses DeepSeek defaults when optional values are omitted", () => {
@@ -52,6 +58,9 @@ describe("loadWorkerConfig", () => {
     expect(() => loadWorkerConfig(validEnv({ DEEPSEEK_API_KEY: "" }))).toThrow(
       /DEEPSEEK_API_KEY/,
     );
+    expect(() => loadWorkerConfig(validEnv({ ZHIPU_API_KEY: "" }))).toThrow(
+      /ZHIPU_API_KEY/,
+    );
   });
 
   it("rejects public browser env names", () => {
@@ -63,6 +72,47 @@ describe("loadWorkerConfig", () => {
     expect(() =>
       loadWorkerConfig(validEnv({ WXT_PUBLIC_API_ORIGIN: "http://localhost:3000" })),
     ).toThrow(/WXT_PUBLIC_/);
+    expect(() =>
+      loadWorkerConfig(validEnv({ NEXT_PUBLIC_ZHIPU_API_KEY: "test-zhipu-key-not-for-git" })),
+    ).toThrow(/NEXT_PUBLIC_/);
+    expect(() =>
+      loadWorkerConfig(validEnv({ WXT_PUBLIC_ZHIPU_API_KEY: "test-zhipu-key-not-for-git" })),
+    ).toThrow(/WXT_PUBLIC_/);
+  });
+
+  it("rejects GLM-OCR loopback, non-HTTPS, invalid model and timeout bounds", () => {
+    expect(() =>
+      loadWorkerConfig(validEnv({ GLM_OCR_BASE_URL: "http://open.bigmodel.cn/api/paas/v4" })),
+    ).toThrow(/GLM_OCR_BASE_URL/);
+    expect(() =>
+      loadWorkerConfig(validEnv({ GLM_OCR_BASE_URL: "https://127.0.0.1:8443" })),
+    ).toThrow(/GLM_OCR_BASE_URL/);
+    expect(() =>
+      loadWorkerConfig(validEnv({ GLM_OCR_BASE_URL: "https://localhost/ocr" })),
+    ).toThrow(/GLM_OCR_BASE_URL/);
+    expect(() => loadWorkerConfig(validEnv({ GLM_OCR_MODEL: "glm-4v" }))).toThrow(
+      /GLM_OCR_MODEL/,
+    );
+    expect(() => loadWorkerConfig(validEnv({ GLM_OCR_TIMEOUT_MS: "1000" }))).toThrow(
+      /GLM_OCR_TIMEOUT_MS/,
+    );
+    expect(() => loadWorkerConfig(validEnv({ GLM_OCR_TIMEOUT_MS: "200000" }))).toThrow(
+      /GLM_OCR_TIMEOUT_MS/,
+    );
+  });
+
+  it("accepts an explicit sensitive-external-AI flag", () => {
+    expect(
+      loadWorkerConfig(validEnv({ ALLOW_SENSITIVE_EXTERNAL_AI: "true" }))
+        .allowSensitiveExternalAi,
+    ).toBe(true);
+    expect(
+      loadWorkerConfig(validEnv({ ALLOW_SENSITIVE_EXTERNAL_AI: "false" }))
+        .allowSensitiveExternalAi,
+    ).toBe(false);
+    expect(() =>
+      loadWorkerConfig(validEnv({ ALLOW_SENSITIVE_EXTERNAL_AI: "yes" })),
+    ).toThrow(/ALLOW_SENSITIVE_EXTERNAL_AI/);
   });
 
   it("rejects out-of-range worker bounds", () => {
