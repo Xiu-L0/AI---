@@ -9,6 +9,103 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      asset_ocr_results: {
+        Row: {
+          created_at: string
+          data_info: Json
+          id: string
+          input_sha256: string
+          layout_details: Json
+          markdown_text: string
+          model: string
+          owner_user_id: string
+          processing_run_id: string
+          provider: string
+          provider_request_id: string
+          source_attachment_id: string
+          source_item_id: string
+          source_version_id: string
+          space_id: string
+          usage_json: Json | null
+        }
+        Insert: {
+          created_at?: string
+          data_info: Json
+          id?: string
+          input_sha256: string
+          layout_details: Json
+          markdown_text: string
+          model: string
+          owner_user_id: string
+          processing_run_id: string
+          provider: string
+          provider_request_id: string
+          source_attachment_id: string
+          source_item_id: string
+          source_version_id: string
+          space_id: string
+          usage_json?: Json | null
+        }
+        Update: {
+          created_at?: string
+          data_info?: Json
+          id?: string
+          input_sha256?: string
+          layout_details?: Json
+          markdown_text?: string
+          model?: string
+          owner_user_id?: string
+          processing_run_id?: string
+          provider?: string
+          provider_request_id?: string
+          source_attachment_id?: string
+          source_item_id?: string
+          source_version_id?: string
+          space_id?: string
+          usage_json?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "asset_ocr_results_attachment_version_owner_fk"
+            columns: [
+              "source_attachment_id",
+              "source_version_id",
+              "owner_user_id",
+            ]
+            isOneToOne: false
+            referencedRelation: "source_attachments"
+            referencedColumns: ["id", "source_version_id", "owner_user_id"]
+          },
+          {
+            foreignKeyName: "asset_ocr_results_item_owner_space_fk"
+            columns: ["source_item_id", "owner_user_id", "space_id"]
+            isOneToOne: false
+            referencedRelation: "source_items"
+            referencedColumns: ["id", "owner_user_id", "space_id"]
+          },
+          {
+            foreignKeyName: "asset_ocr_results_run_owner_space_fk"
+            columns: ["processing_run_id", "owner_user_id", "space_id"]
+            isOneToOne: false
+            referencedRelation: "processing_runs"
+            referencedColumns: ["id", "owner_user_id", "space_id"]
+          },
+          {
+            foreignKeyName: "asset_ocr_results_space_owner_fk"
+            columns: ["space_id", "owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "spaces"
+            referencedColumns: ["id", "owner_user_id"]
+          },
+          {
+            foreignKeyName: "asset_ocr_results_version_item_owner_fk"
+            columns: ["source_version_id", "source_item_id", "owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "source_versions"
+            referencedColumns: ["id", "source_item_id", "owner_user_id"]
+          },
+        ]
+      }
       capture_sessions: {
         Row: {
           created_at: string
@@ -709,6 +806,7 @@ export type Database = {
           metadata_json: Json | null
           ordinal: number
           owner_user_id: string
+          source_attachment_id: string | null
           source_item_id: string
           source_message_id: string | null
           source_version_id: string
@@ -727,6 +825,7 @@ export type Database = {
           metadata_json?: Json | null
           ordinal: number
           owner_user_id: string
+          source_attachment_id?: string | null
           source_item_id: string
           source_message_id?: string | null
           source_version_id: string
@@ -745,6 +844,7 @@ export type Database = {
           metadata_json?: Json | null
           ordinal?: number
           owner_user_id?: string
+          source_attachment_id?: string | null
           source_item_id?: string
           source_message_id?: string | null
           source_version_id?: string
@@ -753,6 +853,17 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "source_blocks_attachment_version_owner_fk"
+            columns: [
+              "source_attachment_id",
+              "source_version_id",
+              "owner_user_id",
+            ]
+            isOneToOne: false
+            referencedRelation: "source_attachments"
+            referencedColumns: ["id", "source_version_id", "owner_user_id"]
+          },
           {
             foreignKeyName: "source_blocks_item_owner_space_fk"
             columns: ["source_item_id", "owner_user_id", "space_id"]
@@ -1152,6 +1263,23 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      persist_asset_ocr_result: {
+        Args: {
+          p_attachment_id: string
+          p_data_info: Json
+          p_input_sha256: string
+          p_job_id: string
+          p_layout_details: Json
+          p_markdown_text: string
+          p_model: string
+          p_provider: string
+          p_provider_request_id: string
+          p_run_id: string
+          p_usage_json: Json
+          p_worker_id: string
+        }
+        Returns: string
       }
       persist_knowledge_extraction: {
         Args: {
