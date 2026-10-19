@@ -118,6 +118,101 @@ describe("GlmOcrProvider", () => {
     logSpy.mockRestore();
   });
 
+  it("normalizes pixel wire boxes and keeps already-unit official boxes", async () => {
+    const pixelProvider = new GlmOcrProvider({
+      apiKey,
+      fetchImpl: async () =>
+        jsonResponse(
+          validApiResponse({
+            layout_details: [[validLayoutDetail({ bbox_2d: [60, 80, 300, 240] })]],
+          }),
+        ),
+    });
+    await expect(recognize(pixelProvider)).resolves.toMatchObject({
+      regions: [{ bbox: [0.1, 0.1, 0.5, 0.3], width: 600, height: 800 }],
+    });
+
+    const unitProvider = new GlmOcrProvider({
+      apiKey,
+      fetchImpl: async () => jsonResponse(validApiResponse()),
+    });
+    await expect(recognize(unitProvider)).resolves.toMatchObject({
+      regions: [{ bbox: [0.1, 0.1, 0.5, 0.3] }],
+    });
+  });
+
+  it("rejects unverifiable or out-of-range wire boxes without leaking secrets", async () => {
+    const cases: Array<{ name: string; body: unknown }> = [
+      {
+        name: "missing size",
+        body: validApiResponse({
+          layout_details: [[validLayoutDetail({ bbox_2d: [60, 80, 300, 240], width: undefined, height: undefined })]],
+          data_info: { num_pages: 1 },
+        }),
+      },
+      {
+        name: "zero size",
+        body: validApiResponse({
+          layout_details: [[validLayoutDetail({ bbox_2d: [60, 80, 300, 240], width: 0, height: 800 })]],
+          data_info: { num_pages: 1 },
+        }),
+      },
+      {
+        name: "out of bounds pixels",
+        body: validApiResponse({
+          layout_details: [[validLayoutDetail({ bbox_2d: [60, 80, 700, 240] })]],
+        }),
+      },
+      {
+        name: "negative",
+        body: validApiResponse({
+          layout_details: [[validLayoutDetail({ bbox_2d: [-1, 80, 300, 240] })]],
+        }),
+      },
+      {
+        name: "inverted",
+        body: validApiResponse({
+          layout_details: [[validLayoutDetail({ bbox_2d: [300, 80, 60, 240] })]],
+        }),
+      },
+      {
+        name: "non-finite",
+        body: validApiResponse({
+          layout_details: [[validLayoutDetail({ bbox_2d: [60, Number.NaN, 300, 240] })]],
+        }),
+      },
+      {
+        name: "wrong shape",
+        body: validApiResponse({
+          layout_details: [[validLayoutDetail({ bbox_2d: [60, 80, 300] })]],
+        }),
+      },
+    ];
+
+    for (const testCase of cases) {
+      const provider = new GlmOcrProvider({
+        apiKey,
+        fetchImpl: async () => jsonResponse(testCase.body),
+      });
+      try {
+        await recognize(provider);
+        throw new Error(`expected invalid_bbox for ${testCase.name}`);
+      } catch (error) {
+        expect(error, testCase.name).toBeInstanceOf(OcrProviderError);
+        const providerError = error as OcrProviderError;
+        expect(providerError.code, testCase.name).toBe("invalid_bbox");
+        expect(providerError.retryable).toBe(false);
+        expect(providerError.message).toBe("zhipu OCR failed (invalid_bbox)");
+        expect(providerError.message).not.toContain(apiKey);
+        expect(providerError.message).not.toContain(pngBase64);
+        expect(providerError.message).not.toContain(sensitiveMarkdown);
+        expect(JSON.stringify(providerError)).not.toContain(apiKey);
+        expect(JSON.stringify(providerError)).not.toContain(pngBase64);
+        expect(JSON.stringify(providerError)).not.toContain("60,80,300");
+      }
+    }
+  });
+
   it("maps timeout, 401/403, 408/429/5xx, invalid JSON, invalid bbox and empty Markdown", async () => {
     const timeoutProvider = new GlmOcrProvider({
       apiKey,

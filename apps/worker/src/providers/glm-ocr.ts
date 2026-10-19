@@ -1,7 +1,9 @@
 import {
   GlmOcrApiResponseSchema,
+  OcrBboxSchema,
   OcrRequestSchema,
   OcrResultSchema,
+  type OcrBbox,
   type OcrRequest,
   type OcrResult,
 } from "@recall/contracts";
@@ -54,6 +56,58 @@ function mapZodError(error: ZodError) {
     return safeOcrError({ code: "empty_markdown", retryable: false });
   }
   return safeOcrError({ code: "invalid_schema", retryable: false });
+}
+
+function isPositiveInt(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function resolveTrustedPageSize(
+  region: { width?: number | undefined; height?: number | undefined },
+  page: { width: number; height: number } | undefined,
+): { width: number; height: number } | null {
+  if (isPositiveInt(region.width) && isPositiveInt(region.height)) {
+    return { width: region.width, height: region.height };
+  }
+  if (page && isPositiveInt(page.width) && isPositiveInt(page.height)) {
+    return { width: page.width, height: page.height };
+  }
+  return null;
+}
+
+function invalidBbox(): never {
+  throw safeOcrError({ code: "invalid_bbox", retryable: false });
+}
+
+export function normalizeGlmOcrBbox(
+  bbox: readonly [number, number, number, number],
+  size: { width: number; height: number } | null,
+): OcrBbox {
+  const [x1, y1, x2, y2] = bbox;
+  if (![x1, y1, x2, y2].every(Number.isFinite)) {
+    invalidBbox();
+  }
+  if ([x1, y1, x2, y2].some((value) => value < 0)) {
+    invalidBbox();
+  }
+  if (x2 < x1 || y2 < y1) {
+    invalidBbox();
+  }
+  if (!size || !isPositiveInt(size.width) || !isPositiveInt(size.height)) {
+    invalidBbox();
+  }
+
+  const unit = bbox.some((value) => value > 1)
+    ? x1 > size.width || x2 > size.width || y1 > size.height || y2 > size.height
+      ? invalidBbox()
+      : ([x1 / size.width, y1 / size.height, x2 / size.width, y2 / size.height] as const)
+    : bbox;
+
+  const parsed = OcrBboxSchema.safeParse(unit);
+  if (!parsed.success) {
+    invalidBbox();
+  }
+  return parsed.data;
 }
 
 export class GlmOcrProvider implements OcrProvider {
@@ -147,26 +201,32 @@ export class GlmOcrProvider implements OcrProvider {
       throw safeOcrError({ code: "empty_markdown", retryable: false });
     }
 
-    const pages =
-      apiResponse.data_info.pages && apiResponse.data_info.pages.length > 0
-        ? apiResponse.data_info.pages
-        : apiResponse.layout_details.map((pageRegions) => ({
-            width: pageRegions[0]?.width ?? 1,
-            height: pageRegions[0]?.height ?? 1,
-          }));
-
+    const dataPages = apiResponse.data_info.pages ?? [];
     const regions = apiResponse.layout_details.flatMap((pageRegions, pageIndex) => {
-      const page = pages[pageIndex] ?? pages[0];
-      return pageRegions.map((region) => ({
-        page: pageIndex + 1,
-        index: region.index,
-        label: region.label,
-        bbox: region.bbox_2d,
-        content: region.content ?? "",
-        width: region.width ?? page?.width ?? 1,
-        height: region.height ?? page?.height ?? 1,
-      }));
+      const page = dataPages[pageIndex];
+      return pageRegions.map((region) => {
+        const size = resolveTrustedPageSize(region, page);
+        return {
+          page: pageIndex + 1,
+          index: region.index,
+          label: region.label,
+          bbox: normalizeGlmOcrBbox(region.bbox_2d, size),
+          content: region.content ?? "",
+          width: size?.width ?? invalidBbox(),
+          height: size?.height ?? invalidBbox(),
+        };
+      });
     });
+    const pages =
+      dataPages.length > 0
+        ? dataPages
+        : apiResponse.layout_details.map((_, pageIndex) => {
+            const first = regions.find((region) => region.page === pageIndex + 1);
+            if (!first) {
+              invalidBbox();
+            }
+            return { width: first.width, height: first.height };
+          });
 
     try {
       return OcrResultSchema.parse({

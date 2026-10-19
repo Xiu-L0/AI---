@@ -22,6 +22,13 @@ export const OcrBboxSchema = z
     message: "OCR bbox must be [x1,y1,x2,y2] with x2>=x1 and y2>=y1",
   });
 
+export const GlmOcrWireBboxSchema = z.tuple([
+  z.number().finite(),
+  z.number().finite(),
+  z.number().finite(),
+  z.number().finite(),
+]);
+
 export const OcrRegionLabelSchema = z.enum(["image", "text", "formula", "table"]);
 
 export const OcrRequestSchema = z
@@ -87,10 +94,10 @@ export const GlmOcrLayoutDetailSchema = z
   .object({
     index: z.number().int().nonnegative(),
     label: OcrRegionLabelSchema,
-    bbox_2d: OcrBboxSchema,
+    bbox_2d: GlmOcrWireBboxSchema,
     content: z.string().max(MAX_MARKDOWN_BYTES).nullable().optional(),
-    height: z.number().int().positive().optional(),
-    width: z.number().int().positive().optional(),
+    height: z.number().int().finite().optional(),
+    width: z.number().int().finite().optional(),
   })
   .strict();
 
@@ -141,6 +148,7 @@ export const GlmOcrApiResponseSchema = z
 
 export type OcrMimeType = z.infer<typeof OcrMimeTypeSchema>;
 export type OcrBbox = z.infer<typeof OcrBboxSchema>;
+export type GlmOcrWireBbox = z.infer<typeof GlmOcrWireBboxSchema>;
 export type OcrRegionLabel = z.infer<typeof OcrRegionLabelSchema>;
 export type OcrRequest = z.infer<typeof OcrRequestSchema>;
 export type OcrResult = z.infer<typeof OcrResultSchema>;

@@ -104,19 +104,49 @@ describe("OCR contracts", () => {
     expect(parsed.request_id).toBe("req-ocr-fixture-1");
   });
 
-  it("rejects empty Markdown, invalid bbox and oversized layout JSON", () => {
-    expect(OcrResultSchema.safeParse(validResult({ markdown: "   " })).success).toBe(false);
+  it("accepts official GLM-OCR wire bbox values without treating them as persisted unit boxes", () => {
     expect(
       GlmOcrApiResponseSchema.safeParse(
         validApiResponse({
-          layout_details: [[validLayoutDetail({ bbox_2d: [1.2, 0, 0.5, 0.3] })]],
+          layout_details: [[validLayoutDetail({ bbox_2d: [60, 80, 300, 240] })]],
+        }),
+      ).success,
+    ).toBe(true);
+    expect(
+      OcrResultSchema.safeParse(
+        validResult({
+          regions: [
+            {
+              page: 1,
+              index: 0,
+              label: "text",
+              bbox: [60, 80, 300, 240],
+              content: "Synthetic OCR markdown.",
+              width: 600,
+              height: 800,
+            },
+          ],
         }),
       ).success,
     ).toBe(false);
+  });
+
+  it("rejects empty Markdown, malformed wire bbox and oversized layout JSON", () => {
+    expect(OcrResultSchema.safeParse(validResult({ markdown: "   " })).success).toBe(false);
     expect(
-      GlmOcrApiResponseSchema.safeParse(
-        validApiResponse({
-          layout_details: [[validLayoutDetail({ bbox_2d: [0.5, 0.1, 0.2, 0.3] })]],
+      OcrResultSchema.safeParse(
+        validResult({
+          regions: [
+            {
+              page: 1,
+              index: 0,
+              label: "text",
+              bbox: [0.5, 0.1, 0.2, 0.3],
+              content: "Synthetic OCR markdown.",
+              width: 600,
+              height: 800,
+            },
+          ],
         }),
       ).success,
     ).toBe(false);
@@ -124,6 +154,13 @@ describe("OCR contracts", () => {
       GlmOcrApiResponseSchema.safeParse(
         validApiResponse({
           layout_details: [[validLayoutDetail({ bbox_2d: [0.1, 0.1, 0.5] })]],
+        }),
+      ).success,
+    ).toBe(false);
+    expect(
+      GlmOcrApiResponseSchema.safeParse(
+        validApiResponse({
+          layout_details: [[validLayoutDetail({ bbox_2d: [NaN, 0.1, 0.5, 0.3] })]],
         }),
       ).success,
     ).toBe(false);
