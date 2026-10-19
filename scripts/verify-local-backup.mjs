@@ -2,11 +2,17 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { assertSafeRelativePath, sha256File } from "./local-backup-lib.mjs";
+import {
+  REQUIRED_BACKUP_TABLES,
+  assertSafeRelativePath,
+  collectTableExportIntegrityErrors,
+  parseCopyRows,
+  sha256File,
+} from "./local-backup-lib.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const BACKUPS_ROOT = path.join(REPO_ROOT, "backups");
-const FILE_ROLES = new Set(["schema", "data", "storage-object"]);
+const FILE_ROLES = new Set(["schema", "data", "storage-object", "table-export"]);
 const SECRET_PATTERNS = [
   { name: "signed URL query", pattern: /[?&](?:token|sig)=/i },
   { name: "bearer token", pattern: /Bearer\s+\S+/i },
@@ -64,6 +70,15 @@ function validateManifestSchema(manifest, errors) {
         addError(errors, `manifest.json tableRowCounts.${table} must be a non-negative integer`);
       }
     }
+    for (const table of REQUIRED_BACKUP_TABLES) {
+      const key = `public.${table}`;
+      if (!Number.isInteger(manifest.tableRowCounts[key])) {
+        addError(errors, `manifest.json tableRowCounts missing ${key}`);
+      }
+    }
+  }
+  if (!isPlainObject(manifest.tableExports)) {
+    addError(errors, "manifest.json tableExports must be an object");
   }
   if (!Array.isArray(manifest.files)) {
     addError(errors, "manifest.json files must be an array");
@@ -130,33 +145,6 @@ function collectStoragePaths(manifest) {
     .map((file) => file.storagePath)
     .filter((value) => typeof value === "string" && value.length > 0);
   return new Set([...fromObjects, ...fromFiles]);
-}
-
-function parseCopyRows(sql, tableName) {
-  const marker = `COPY public.${tableName} (`;
-  const start = sql.indexOf(marker);
-  if (start === -1) {
-    return { columns: [], rows: [] };
-  }
-  const headerEnd = sql.indexOf(") FROM stdin;", start);
-  if (headerEnd === -1) {
-    return { columns: [], rows: [] };
-  }
-  const columns = sql
-    .slice(start + marker.length, headerEnd)
-    .split(",")
-    .map((column) => column.trim());
-  const rowsStart = headerEnd + ") FROM stdin;\n".length;
-  const rowsEnd = sql.indexOf("\n\\.\n", rowsStart);
-  if (rowsEnd === -1) {
-    return { columns, rows: [] };
-  }
-  const body = sql.slice(rowsStart, rowsEnd);
-  const rows = body
-    .split("\n")
-    .filter((line) => line.length > 0)
-    .map((line) => line.split("\t"));
-  return { columns, rows };
 }
 
 function attachmentStoragePathsFromDump(sql) {
@@ -250,6 +238,9 @@ async function main() {
     addError(errors, "data.sql is missing");
   } else {
     scanSecrets("data.sql", dataSql, errors);
+    for (const message of collectTableExportIntegrityErrors(manifest, dataSql)) {
+      addError(errors, message);
+    }
     const requiredPaths = attachmentStoragePathsFromDump(dataSql);
     const presentPaths = collectStoragePaths(manifest);
     for (const storagePath of requiredPaths) {
@@ -265,11 +256,13 @@ async function main() {
   }
 
   const tableCount = Object.keys(manifest.tableRowCounts ?? {}).length;
+  const requiredTableCount = REQUIRED_BACKUP_TABLES.length;
   const storageObjectCount = (manifest.storageObjects ?? []).length;
   console.log(
     [
       `Backup timestamp: ${manifest.createdAt}`,
       `Tables recorded: ${tableCount}`,
+      `Required tables: ${requiredTableCount}`,
       `Storage objects: ${storageObjectCount}`,
       `Total bytes: ${totalBytes}`,
       "Verification: pass",

@@ -8,7 +8,10 @@
 
 - `backups/<timestamp>/manifest.json` 存在，且 `formatVersion === 1`。
 - 清单中的每个文件都存在，字节数与 SHA-256 均匹配。
-- 清单中的表行数等于备份当时对本地库的只读计数。
+- 清单记录 Stage 0 到 Stage 2C 的全部业务表行数：`spaces`、`space_members`、`source_items`、`capture_sessions`、`source_versions`、`source_messages`、`source_attachments`、`source_blocks`、`source_asset_links`、`asset_ocr_results`、`processing_jobs`、`processing_runs`、`knowledge_items`、`knowledge_versions`、`citations`、`review_tasks`。
+- 每张表都有独立 `tableExports` 条目，包含行数、SHA-256 与 `tables/<table>.copy` 导出路径，且与 `data.sql` 中对应 COPY 正文一致。
+- Storage 列表会按页继续拉取，直到某一页对象数小于页大小；每个对象记录路径、字节数与 SHA-256。
+- 清单中的表行数等于备份当时对本地库的只读计数，并与 dump COPY 行数一致。
 - 每个 `source_attachments.storage_path` 都有对应的已下载对象。
 - schema/data SQL 与清单中不得出现 service-role JWT、signed URL 查询参数或 bearer token。
 - schema 与 data 只允许恢复到**另一个**临时 PostgreSQL/Supabase 目标；其 project ID 与端口必须不同于当前数据环境。
@@ -29,7 +32,8 @@ pnpm backup:local
 - `NEXT_PUBLIC_SUPABASE_URL` 或 `SUPABASE_URL` 指向 loopback。
 - `SUPABASE_SERVICE_ROLE_KEY` 只存在于进程环境，不会写入清单。
 - 使用 `supabase db dump --local --schema public,auth,storage` 导出 schema 与 data。
-- 通过 Storage API 下载私有 bucket `raw-captures`，不复制未文档化的 Docker volume 路径。
+- 从 data dump 抽出每张业务表的 COPY 正文写入 `tables/<table>.copy`，并登记行数与 SHA-256。
+- 通过 Storage API 分页下载私有 bucket `raw-captures`，不复制未文档化的 Docker volume 路径。
 - 最后才写 `manifest.json`。失败时保留不完整目录，但不写有效完成标记。
 
 产物位于被 Git 忽略的 `backups/<UTC timestamp>/`。
@@ -40,7 +44,7 @@ pnpm backup:local
 pnpm backup:verify -- backups/<timestamp>
 ```
 
-校验器会拒绝仓库 `backups/` 以外的目录。通过时应打印备份时间、记录的表数量、Storage 对象数、总字节数和 `Verification: pass`。任一不匹配都会以一行可操作错误退出非零。
+校验器会拒绝仓库 `backups/` 以外的目录。通过时应打印备份时间、记录的表数量、必含表数量、Storage 对象数、总字节数和 `Verification: pass`。校验比较的是行数与 SHA-256，而不是只检查 JSON 形状。任一不匹配都会以一行可操作错误退出非零。
 
 不要在校验脚本、手册或提交中嵌入或推断数据库密码。
 
@@ -60,6 +64,10 @@ pnpm backup:verify -- backups/<timestamp>
 ```sql
 select 'auth.users' as name, count(*) from auth.users
 union all
+select 'public.spaces', count(*) from public.spaces
+union all
+select 'public.space_members', count(*) from public.space_members
+union all
 select 'public.source_items', count(*) from public.source_items
 union all
 select 'public.capture_sessions', count(*) from public.capture_sessions
@@ -70,7 +78,23 @@ select 'public.source_messages', count(*) from public.source_messages
 union all
 select 'public.source_attachments', count(*) from public.source_attachments
 union all
+select 'public.source_blocks', count(*) from public.source_blocks
+union all
+select 'public.source_asset_links', count(*) from public.source_asset_links
+union all
+select 'public.asset_ocr_results', count(*) from public.asset_ocr_results
+union all
 select 'public.processing_jobs', count(*) from public.processing_jobs
+union all
+select 'public.processing_runs', count(*) from public.processing_runs
+union all
+select 'public.knowledge_items', count(*) from public.knowledge_items
+union all
+select 'public.knowledge_versions', count(*) from public.knowledge_versions
+union all
+select 'public.citations', count(*) from public.citations
+union all
+select 'public.review_tasks', count(*) from public.review_tasks
 union all
 select 'public.extension_tokens', count(*) from public.extension_tokens;
 ```
@@ -96,3 +120,17 @@ select 'public.extension_tokens', count(*) from public.extension_tokens;
 | 总字节数 | 14103449 |
 
 本表只记录计数与校验结果，不写入原文、对象名、密钥或 signed URL。当前数据环境未作为恢复目标。
+
+## 7. Stage 2C 覆盖备份记录
+
+Stage 2C 将知识块、OCR 结果与审核表纳入必含清单，并按页拉取全部 Storage 对象。下表只记录一次通过校验的覆盖备份，不改写第 6 节的历史计数。
+
+| 项目 | 值 |
+| --- | --- |
+| 备份时间戳 | 2026-10-19T15:51:34.636Z |
+| 校验结果 | pass |
+| 记录表数量 | 18（其中必含业务表 16） |
+| Storage 对象数 | 78 |
+| 总字节数 | 14965902 |
+
+本表只记录计数与校验结果。备份目录仍被 Git 忽略，不得提交 SQL、`.copy` 导出、对象文件或密钥。

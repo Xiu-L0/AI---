@@ -6,23 +6,21 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 
 import {
+  OPTIONAL_BACKUP_TABLES,
+  REQUIRED_BACKUP_TABLES,
+  STORAGE_LIST_PAGE_SIZE,
   assertSafeRelativePath,
   buildBackupManifest,
+  hashCopyBody,
+  listAllStorageEntries,
+  parseCopyRows,
   sha256File,
 } from "./local-backup-lib.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const BACKUPS_ROOT = path.join(REPO_ROOT, "backups");
 const STORAGE_BUCKET = "raw-captures";
-const BUSINESS_TABLES = [
-  "source_items",
-  "capture_sessions",
-  "source_versions",
-  "source_messages",
-  "source_attachments",
-  "processing_jobs",
-  "extension_tokens",
-];
+const BUSINESS_TABLES = [...REQUIRED_BACKUP_TABLES, ...OPTIONAL_BACKUP_TABLES];
 
 function fail(message) {
   console.error(message);
@@ -144,31 +142,18 @@ async function countAuthUsers(client) {
   }
 }
 
-async function listStorageObjects(client, prefix = "") {
-  const { data, error } = await client.storage.from(STORAGE_BUCKET).list(prefix, {
-    limit: 1000,
-    offset: 0,
-    sortBy: { column: "name", order: "asc" },
-  });
-  if (error) {
-    throw new Error(`Failed to list ${STORAGE_BUCKET}/${prefix}: ${error.message}`);
-  }
-
-  const objects = [];
-  for (const entry of data ?? []) {
-    const nextPrefix = prefix ? `${prefix}/${entry.name}` : entry.name;
-    const isFolder = entry.id === null || entry.metadata == null;
-    if (isFolder) {
-      objects.push(...(await listStorageObjects(client, nextPrefix)));
-      continue;
-    }
-    objects.push({
-      storagePath: nextPrefix,
-      bytes: Number(entry.metadata?.size ?? 0),
-      contentType: typeof entry.metadata?.mimetype === "string" ? entry.metadata.mimetype : undefined,
+async function listStorageObjects(client) {
+  return listAllStorageEntries(async (prefix, options) => {
+    const { data, error } = await client.storage.from(STORAGE_BUCKET).list(prefix, {
+      limit: options.limit ?? STORAGE_LIST_PAGE_SIZE,
+      offset: options.offset ?? 0,
+      sortBy: { column: "name", order: "asc" },
     });
-  }
-  return objects;
+    if (error) {
+      throw new Error(`Failed to list ${STORAGE_BUCKET}/${prefix}: ${error.message}`);
+    }
+    return data ?? [];
+  });
 }
 
 async function downloadStorageObjects(client, backupDir) {
@@ -246,6 +231,36 @@ async function hashedSqlFiles(backupDir) {
   return files;
 }
 
+async function exportTableCopies(backupDir, dataSql) {
+  await mkdir(path.join(backupDir, "tables"), { recursive: true, mode: 0o700 });
+  /** @type {import("./local-backup-lib.mjs").BackupFileEntry[]} */
+  const files = [];
+  /** @type {Record<string, { rowCount: number, sha256: string, exportPath: string }>} */
+  const tableExports = {};
+
+  for (const table of BUSINESS_TABLES) {
+    const parsed = parseCopyRows(dataSql, table);
+    const relativePath = `tables/${table}.copy`;
+    const destination = path.join(backupDir, relativePath);
+    await writeFile(destination, parsed.body);
+    const info = await stat(destination);
+    const sha256 = hashCopyBody(parsed.body);
+    files.push({
+      relativePath,
+      sha256,
+      bytes: info.size,
+      role: "table-export",
+    });
+    tableExports[`public.${table}`] = {
+      rowCount: parsed.rows.length,
+      sha256,
+      exportPath: relativePath,
+    };
+  }
+
+  return { files, tableExports };
+}
+
 async function main() {
   const supabaseUrl = resolveLocalSupabaseUrl();
   const serviceRoleKey = requireServiceRoleKey();
@@ -272,14 +287,24 @@ async function main() {
       tableRowCounts[`public.${table}`] = await countTable(client, table);
     }
 
+    const dataSql = await readFile(path.join(backupDir, "data.sql"), "utf8");
     const sqlFiles = await hashedSqlFiles(backupDir);
+    const tableCopy = await exportTableCopies(backupDir, dataSql);
+    for (const [table, exported] of Object.entries(tableCopy.tableExports)) {
+      if (tableRowCounts[table] !== exported.rowCount) {
+        throw new Error(
+          `${table} live count ${tableRowCounts[table]} does not match dump COPY rows ${exported.rowCount}`,
+        );
+      }
+    }
     const storageFiles = await downloadStorageObjects(client, backupDir);
     const manifest = buildBackupManifest({
       createdAt,
       cliVersion: versions.cliVersion,
       appVersion: versions.appVersion,
       tableRowCounts,
-      files: [...sqlFiles, ...storageFiles],
+      tableExports: tableCopy.tableExports,
+      files: [...sqlFiles, ...tableCopy.files, ...storageFiles],
     });
 
     await writeFile(path.join(backupDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
