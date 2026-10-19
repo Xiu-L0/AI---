@@ -16,6 +16,7 @@ const item: CaptureSourceRecord = {
   id: "10000000-0000-0000-0000-000000000001",
   sensitivity: "normal",
   source: "chatgpt_web",
+  sourcePlatform: "chatgpt",
   title: "可靠采集讨论",
   updatedAt: "2026-07-29T12:00:00.000Z",
 };
@@ -47,6 +48,7 @@ function createRepository(
     createAttachmentDownloadUrl: vi.fn(async () => "https://signed.test/file"),
     listAttachments: vi.fn(async () => []),
     listMessages: vi.fn(async () => []),
+    listOcrResults: vi.fn(async () => []),
     listProcessingJobs: vi.fn(async () => []),
     listSourceItems: vi.fn(async () => [item]),
     listVersions: vi.fn(async () => [firstVersion, secondVersion]),
@@ -92,8 +94,10 @@ describe("listCapturesWithRepository", () => {
         async () => [
           {
             failureReason: null,
+            jobType: "normalize_source",
             sourceVersionId: secondVersion.id,
             status: "queued",
+            updatedAt: "2026-09-08T01:00:00.000Z",
           },
         ],
       ),
@@ -125,6 +129,39 @@ describe("listCapturesWithRepository", () => {
     expect(repository.listMessages).toHaveBeenCalledWith(ownerUserId, [
       secondVersion.id,
     ]);
+  });
+
+  it("does not mask a failed OCR job behind a completed normalize job", async () => {
+    const repository = createRepository({
+      listProcessingJobs: vi.fn(async () => [
+        {
+          failureReason: "provider timeout",
+          jobType: "ocr_assets",
+          sourceVersionId: secondVersion.id,
+          status: "failed" as const,
+          updatedAt: "2026-09-08T01:01:00.000Z",
+        },
+        {
+          failureReason: null,
+          jobType: "normalize_source",
+          sourceVersionId: secondVersion.id,
+          status: "complete" as const,
+          updatedAt: "2026-09-08T01:00:00.000Z",
+        },
+      ]),
+    });
+
+    const result = await listCapturesWithRepository(
+      repository,
+      ownerUserId,
+      null,
+      20,
+    );
+    expect(result.items[0]).toMatchObject({
+      processingStatus: "failed",
+      processingFailedJobType: "ocr_assets",
+      processingFailureReason: "provider timeout",
+    });
   });
 
   it("uses update time and source id as a stable cursor", async () => {
@@ -245,5 +282,68 @@ describe("getCaptureDetailsWithRepository", () => {
     ).resolves.toBeNull();
     expect(repository.loadSourceItem).not.toHaveBeenCalled();
     expect(repository.listVersions).not.toHaveBeenCalled();
+  });
+
+  it("attaches OCR markdown and regions to the original image", async () => {
+    const attachmentId = "40000000-0000-0000-0000-000000000001";
+    const repository = createRepository({
+      listAttachments: vi.fn(async () => [
+        {
+          byteSize: 12,
+          clientId: "xhs-image-1",
+          fileName: "xhs-image-1.png",
+          id: attachmentId,
+          mimeType: "image/png",
+          sha256: "a".repeat(64),
+          sourceVersionId: secondVersion.id,
+          storagePath: `${ownerUserId}/capture/xhs-image-1.png`,
+        },
+      ]),
+      listOcrResults: vi.fn(async () => [
+        {
+          markdown: "Synthetic OCR markdown.",
+          model: "glm-ocr",
+          provider: "zhipu",
+          providerRequestId: "req-ocr-web-1",
+          regions: [
+            {
+              bbox: [0.1, 0.1, 0.5, 0.3] as [number, number, number, number],
+              content: "Synthetic OCR markdown.",
+              index: 0,
+              label: "text",
+              page: 1,
+            },
+          ],
+          sourceAttachmentId: attachmentId,
+          sourceVersionId: secondVersion.id,
+          usage: { inputTokens: 4, outputTokens: 6, totalTokens: 10 },
+        },
+      ]),
+      listProcessingJobs: vi.fn(async () => [
+        {
+          failureReason: null,
+          jobType: "ocr_assets",
+          sourceVersionId: secondVersion.id,
+          status: "complete" as const,
+          updatedAt: "2026-09-08T01:02:00.000Z",
+        },
+      ]),
+    });
+
+    const result = await getCaptureDetailsWithRepository(
+      repository,
+      ownerUserId,
+      item.id,
+    );
+    expect(result?.versions[0]).toMatchObject({
+      ocrProgressLabel: "图片识别完成",
+      ocrResults: [
+        expect.objectContaining({
+          markdown: "Synthetic OCR markdown.",
+          providerRequestId: "req-ocr-web-1",
+          sourceAttachmentId: attachmentId,
+        }),
+      ],
+    });
   });
 });

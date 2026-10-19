@@ -16,6 +16,7 @@ const item: CaptureSourceRecord = {
   id: "10000000-0000-0000-0000-000000000001",
   sensitivity: "normal",
   source: "chatgpt_web",
+  sourcePlatform: "chatgpt",
   title: "异常恢复讨论",
   updatedAt: "2026-07-29T12:00:00.000Z",
 };
@@ -117,6 +118,7 @@ describe("listExceptionsWithRepository", () => {
       listFailedProcessingJobs: vi.fn(async () => [
         {
           failureReason: "worker unavailable",
+          jobType: "extract_knowledge",
           sourceVersionId: partial.id,
           updatedAt: "2026-07-29T13:00:00.000Z",
         },
@@ -206,5 +208,43 @@ describe("listExceptionsWithRepository", () => {
     await expect(
       listExceptionsWithRepository(repository, ownerUserId),
     ).resolves.toEqual([]);
+  });
+
+  it("keeps Xiaohongshu OCR failures visible with a source link", async () => {
+    const xhsItem = {
+      ...item,
+      source: null,
+      sourcePlatform: "xiaohongshu",
+      title: "合成小红书笔记",
+    };
+    const version = {
+      ...partial,
+      captureStatus: "complete" as const,
+      missingElements: [],
+      rawText: "synthetic xiaohongshu body",
+    };
+    const repository = createRepository({
+      listSourceItems: vi.fn(async () => [xhsItem]),
+      listVersions: vi.fn(async () => [version]),
+      listFailedProcessingJobs: vi.fn(async () => [
+        {
+          failureReason: "provider timeout",
+          jobType: "ocr_assets",
+          sourceVersionId: version.id,
+          updatedAt: "2026-09-08T01:01:00.000Z",
+        },
+      ]),
+    });
+
+    const result = await listExceptionsWithRepository(repository, ownerUserId);
+    expect(result).toEqual([
+      expect.objectContaining({
+        kind: "processing_failed",
+        jobType: "ocr_assets",
+        failureReason: "provider timeout",
+        sourceItemId: xhsItem.id,
+        title: "合成小红书笔记",
+      }),
+    ]);
   });
 });

@@ -8,6 +8,7 @@ import {
 import { createAdminClient } from "@/lib/supabase/admin";
 
 import { CaptureNotFoundError } from "./finalize-capture";
+import { summarizeProcessingJobs } from "./processing-summary";
 
 export class CapturePendingError extends Error {
   constructor() {
@@ -104,7 +105,7 @@ export async function getCaptureStatus(
   const [
     { count: savedMessageCount, error: messageError },
     { count: savedAttachmentCount, error: attachmentError },
-    { data: job, error: jobError },
+    { data: jobs, error: jobError },
   ] = await Promise.all([
     admin
       .from("source_messages")
@@ -118,20 +119,28 @@ export async function getCaptureStatus(
       .eq("owner_user_id", ownerUserId),
     admin
       .from("processing_jobs")
-      .select("status, failure_reason")
+      .select("job_type, status, failure_reason, updated_at")
       .eq("source_version_id", version.id)
-      .eq("owner_user_id", ownerUserId)
-      .single(),
+      .eq("owner_user_id", ownerUserId),
   ]);
   if (messageError || attachmentError || jobError) {
     throw messageError ?? attachmentError ?? jobError;
   }
 
+  const summary = summarizeProcessingJobs(
+    (jobs ?? []).map((job) => ({
+      failureReason: job.failure_reason,
+      jobType: job.job_type,
+      status: job.status,
+      updatedAt: job.updated_at,
+    })),
+  );
+
   return CaptureStatusResultSchema.parse({
     captureId: session.id,
     sourceItemId: session.source_item_id,
     captureStatus: version.capture_status,
-    processingStatus: job.status,
+    processingStatus: summary.status,
     savedMessageCount: savedMessageCount ?? 0,
     savedAttachmentCount: savedAttachmentCount ?? 0,
     missingElements: version.missing_elements,

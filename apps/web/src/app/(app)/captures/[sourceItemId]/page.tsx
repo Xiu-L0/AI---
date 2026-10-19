@@ -124,6 +124,11 @@ export default async function CaptureDetailsPage({
                 <span className="rounded-full bg-blue-50 px-3 py-1 text-blue-700">
                   后台状态：{version.processingStatus}
                 </span>
+                {version.ocrProgressLabel ? (
+                  <span className="rounded-full bg-indigo-50 px-3 py-1 text-indigo-800">
+                    {version.ocrProgressLabel}
+                  </span>
+                ) : null}
                 <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
                   证据块 {provenanceByVersion.get(version.id)?.blockCount ?? 0}
                 </span>
@@ -149,7 +154,10 @@ export default async function CaptureDetailsPage({
 
             {version.processingFailureReason ? (
               <p className="mt-5 rounded-xl bg-blue-50 p-4 text-sm text-blue-900">
-                原文已保存，后台处理失败：{version.processingFailureReason}
+                {version.processingFailedJobType === "ocr_assets"
+                  ? "原图和正文已安全保存。图片识别失败："
+                  : "原文已保存，后台处理失败："}
+                {version.processingFailureReason}
               </p>
             ) : null}
 
@@ -187,29 +195,74 @@ export default async function CaptureDetailsPage({
             {version.attachments.length > 0 ? (
               <section className="mt-6">
                 <h3 className="text-sm font-semibold text-slate-900">附件</h3>
-                <ul className="mt-3 divide-y divide-slate-200 rounded-xl border border-slate-200">
-                  {version.attachments.map((attachment) => (
-                    <li
-                      className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
-                      key={attachment.id}
-                    >
-                      <div>
-                        <p className="text-sm font-medium text-slate-900">
-                          {attachment.fileName}
-                        </p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          {attachment.mimeType} · {formatBytes(attachment.byteSize)} · SHA-256{" "}
-                          {attachment.sha256.slice(0, 12)}…
-                        </p>
-                      </div>
-                      <a
-                        className="text-sm font-medium text-emerald-700 hover:text-emerald-800"
-                        href={attachment.downloadUrl}
+                <ul className="mt-3 space-y-4">
+                  {version.attachments.map((attachment) => {
+                    const ocr = version.ocrResults.find(
+                      (result) => result.sourceAttachmentId === attachment.id,
+                    );
+                    const isImage = attachment.mimeType.startsWith("image/");
+                    return (
+                      <li
+                        className="rounded-xl border border-slate-200 p-4"
+                        key={attachment.id}
                       >
-                        下载（链接 60 秒有效）
-                      </a>
-                    </li>
-                  ))}
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <p className="text-sm font-medium text-slate-900">
+                              {attachment.fileName}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              {attachment.mimeType} · {formatBytes(attachment.byteSize)} · SHA-256{" "}
+                              {attachment.sha256.slice(0, 12)}…
+                            </p>
+                          </div>
+                          <a
+                            className="text-sm font-medium text-emerald-700 hover:text-emerald-800"
+                            href={attachment.downloadUrl}
+                          >
+                            下载（链接 60 秒有效）
+                          </a>
+                        </div>
+                        {isImage ? (
+                          // Native img keeps the 60-second signed URL out of next/image config.
+                          <img
+                            alt={attachment.fileName}
+                            className="mt-4 max-h-80 rounded-lg border border-slate-200 object-contain"
+                            src={attachment.downloadUrl}
+                          />
+                        ) : null}
+                        {ocr ? (
+                          <div className="mt-4 space-y-3">
+                            <p className="text-xs text-slate-500">
+                              {ocr.provider} / {ocr.model} / 请求 {ocr.providerRequestId}
+                              {ocr.usage
+                                ? ` · tokens ${ocr.usage.inputTokens ?? 0}/${ocr.usage.outputTokens ?? 0}/${ocr.usage.totalTokens ?? 0}`
+                                : null}
+                            </p>
+                            <pre className="whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-sm text-slate-800">
+                              {ocr.markdown}
+                            </pre>
+                            {ocr.regions.length > 0 ? (
+                              <ul className="space-y-2 text-sm text-slate-700">
+                                {ocr.regions.map((region) => (
+                                  <li
+                                    id={`image:${attachment.clientId}/page:${region.page}/region:${region.index}`}
+                                    key={`${region.page}-${region.index}`}
+                                  >
+                                    <p className="text-xs font-medium text-slate-500">
+                                      第 {region.page} 页 · 区域 {region.index} · bbox{" "}
+                                      {region.bbox.join(", ")}
+                                    </p>
+                                    <p className="mt-1 whitespace-pre-wrap">{region.content}</p>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </li>
+                    );
+                  })}
                 </ul>
               </section>
             ) : null}

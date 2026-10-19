@@ -16,7 +16,7 @@ function formatTime(value: string) {
 function exceptionHeading(exception: CaptureException) {
   if (exception.kind === "partial_capture") return "部分内容未采集";
   if (exception.kind === "failed_capture") return "服务器尚未确认保存";
-  return "原文已保存，后台处理失败";
+  return exception.heading;
 }
 
 export default async function ExceptionsPage() {
@@ -105,9 +105,17 @@ export default async function ExceptionsPage() {
                   ) : null}
 
                   {exception.kind === "processing_failed" ? (
-                    <p className="mt-4 text-sm text-blue-950">
-                      原文没有丢失。后台处理失败原因：{exception.failureReason}
-                    </p>
+                    <>
+                      {exception.jobType === "ocr_assets" ? (
+                        <p className="mt-4 text-sm text-blue-950">
+                          原图和正文已安全保存。图片识别失败原因：{exception.failureReason}
+                        </p>
+                      ) : (
+                        <p className="mt-4 text-sm text-blue-950">
+                          原文没有丢失。后台处理失败原因：{exception.failureReason}
+                        </p>
+                      )}
+                    </>
                   ) : null}
                 </div>
 

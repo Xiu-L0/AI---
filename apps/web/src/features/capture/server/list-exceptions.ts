@@ -9,6 +9,7 @@ import type {
   CaptureSourceRecord,
   CaptureVersionRecord,
 } from "./list-captures";
+import { processingExceptionHeading } from "./processing-summary";
 
 type CaptureSource = Database["public"]["Enums"]["capture_source"];
 
@@ -24,6 +25,7 @@ export type FailedCaptureSessionRecord = {
 
 export type FailedProcessingJobRecord = {
   failureReason: string;
+  jobType: string;
   sourceVersionId: string;
   updatedAt: string;
 };
@@ -70,7 +72,9 @@ export type FailedCaptureException = {
 export type FailedProcessingException = {
   createdAt: string;
   failureReason: string;
+  heading: string;
   id: string;
+  jobType: string;
   kind: "processing_failed";
   rawDataSafe: true;
   source: CaptureSource | null;
@@ -159,7 +163,9 @@ export async function listExceptionsWithRepository(
         {
           createdAt: job.updatedAt,
           failureReason: job.failureReason,
-          id: `processing:${job.sourceVersionId}`,
+          heading: processingExceptionHeading(job.jobType),
+          id: `processing:${job.sourceVersionId}:${job.jobType}`,
+          jobType: job.jobType,
           kind: "processing_failed",
           rawDataSafe: true,
           source: item.source,
@@ -205,13 +211,14 @@ export async function createCaptureExceptionRepository(): Promise<CaptureExcepti
     async listFailedProcessingJobs(ownerUserId) {
       const { data, error } = await supabase
         .from("processing_jobs")
-        .select("source_version_id, failure_reason, updated_at")
+        .select("source_version_id, job_type, failure_reason, updated_at, status")
         .eq("owner_user_id", ownerUserId)
-        .eq("status", "failed")
+        .in("status", ["failed", "paused"])
         .order("updated_at", { ascending: false });
       if (error) throw error;
       return data.map((row) => ({
         failureReason: row.failure_reason ?? "后台处理失败",
+        jobType: row.job_type,
         sourceVersionId: row.source_version_id,
         updatedAt: row.updated_at,
       }));
@@ -220,7 +227,7 @@ export async function createCaptureExceptionRepository(): Promise<CaptureExcepti
       const { data, error } = await supabase
         .from("source_items")
         .select(
-          "id, source, title, sensitivity, current_version, created_at, updated_at",
+          "id, source, source_platform, title, sensitivity, current_version, created_at, updated_at",
         )
         .eq("owner_user_id", ownerUserId)
         .is("deleted_at", null);
@@ -231,6 +238,7 @@ export async function createCaptureExceptionRepository(): Promise<CaptureExcepti
         id: row.id,
         sensitivity: row.sensitivity,
         source: row.source,
+        sourcePlatform: row.source_platform ?? null,
         title: row.title,
         updatedAt: row.updated_at,
       }));
