@@ -1075,7 +1075,7 @@ git commit -m "feat: process Xiaohongshu images with GLM OCR"
 - Produces: deterministic source-version processing summary and visible OCR evidence/failure states.
 - Fixes: a failed OCR/extract job can no longer be masked by another completed job for the same version.
 
-- [ ] **Step 1: Write failing aggregation tests**
+- [x] **Step 1: Write failing aggregation tests**
 
 Use the exact precedence `failed > processing > queued > paused > complete`. Assert the selected failure includes job type and the most recent failure time:
 
@@ -1086,17 +1086,17 @@ expect(summarizeProcessingJobs([
 ])).toMatchObject({ status: "failed", failedJobType: "ocr_assets" });
 ```
 
-- [ ] **Step 2: Run focused Web tests and verify failure**
+- [x] **Step 2: Run focused Web tests and verify failure**
 
 Run: `pnpm --filter @recall/web test -- src/features/capture/server`
 
 Expected: FAIL because jobs are currently collapsed with an unordered `Map` or queried with `.single()`.
 
-- [ ] **Step 3: Implement one shared processing aggregator**
+- [x] **Step 3: Implement one shared processing aggregator**
 
 All capture list/detail/status/exception queries must select `job_type, status, failure_reason, updated_at`. Remove direct `new Map(jobs.map(...))` and `.single()` assumptions. The aggregator returns `complete` only when at least one job exists and every current pipeline job is complete.
 
-- [ ] **Step 4: Display clear OCR state and evidence**
+- [x] **Step 4: Display clear OCR state and evidence**
 
 Capture details show:
 
@@ -1108,11 +1108,11 @@ Capture details show:
 
 The exception page labels `ocr_assets` as `图片识别失败`, states `原图和正文已安全保存`, and links to the saved source. No dismiss action is added in this plan.
 
-- [ ] **Step 5: Add Web E2E for success and failure**
+- [x] **Step 5: Add Web E2E for success and failure**
 
 Seed synthetic image/OCR rows and prove account A sees its image and OCR failure while account B receives no row and cannot open the source URL. Test the mixed state where normalize is complete but OCR failed.
 
-- [ ] **Step 6: Run Web tests and build**
+- [x] **Step 6: Run Web tests and build**
 
 Run:
 
@@ -1124,7 +1124,7 @@ pnpm --filter @recall/web build
 
 Expected: PASS and no React hydration or unsafe HTML warnings.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/web/src/features/capture apps/web/src/app/'(app)'/captures apps/web/src/app/'(app)'/exceptions tests/e2e/web/xiaohongshu-ocr.spec.ts
@@ -1144,21 +1144,21 @@ git commit -m "feat: surface Xiaohongshu OCR progress and failures"
 **Interfaces:**
 - Produces: backup manifest covering all Stage 0–2C facts and every Storage object.
 
-- [ ] **Step 1: Write a failing manifest test**
+- [x] **Step 1: Write a failing manifest test**
 
 Require these tables at minimum: `spaces`, `space_members`, `source_items`, `capture_sessions`, `source_versions`, `source_messages`, `source_attachments`, `source_blocks`, `source_asset_links`, `asset_ocr_results`, `processing_jobs`, `processing_runs`, `knowledge_items`, `knowledge_versions`, `citations`, `review_tasks`. Require pagination beyond 1,000 Storage objects.
 
-- [ ] **Step 2: Run the script test and verify failure**
+- [x] **Step 2: Run the script test and verify failure**
 
 Run: `pnpm test -- scripts/local-backup.test.ts`
 
 Expected: FAIL because the current scripts omit Stage 1/2C tables and only list the first Storage page.
 
-- [ ] **Step 3: Extend export, pagination and verification**
+- [x] **Step 3: Extend export, pagination and verification**
 
 Record row count, SHA-256 and export path per table; iterate Storage list pages until fewer than the page size; record object count, path, bytes and SHA-256. Verification must compare manifest counts and hashes, not only JSON shape.
 
-- [ ] **Step 4: Verify against a disposable populated database**
+- [x] **Step 4: Verify against a disposable populated database**
 
 Run:
 
@@ -1169,7 +1169,7 @@ pnpm backup:verify
 
 Expected: verifier reports every required table and all synthetic image objects; no secret values appear in the archive manifest.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts docs/runbooks/local-data-backup-and-restore.md
@@ -1188,15 +1188,15 @@ git commit -m "fix: back up knowledge and OCR evidence completely"
 **Interfaces:**
 - Produces: reproducible setup, sanitized evidence and signed Stage 2C exit record.
 
-- [ ] **Step 1: Write the runbook before using a real API key**
+- [x] **Step 1: Write the runbook before using a real API key**
 
 Document exact environment variable names, how to create a restricted key, how to set `ALLOW_SENSITIVE_EXTERNAL_AI`, how to install the unpacked extension in Chrome and Edge, how to inspect Outbox, Worker runs, OCR rows and Web exceptions, and how to revoke/rotate the key. Never include an actual credential, full image Base64, signed URL or sensitive note content.
 
-- [ ] **Step 2: Record the supplier-policy gate explicitly**
+- [x] **Step 2: Record the supplier-policy gate explicitly**
 
 Link the current智谱隐私政策 and record the user’s account/contract decision about training and retention. The public policy currently allows anonymized information to be used to improve services, including machine-learning/model training, and states retention is for the shortest necessary period rather than zero retention. Do not claim “不用于训练/零留存” unless the user’s actual account agreement or console setting proves it. If the evidence is absent, limit real acceptance to non-sensitive samples even though the code supports the sensitivity switch.
 
-- [ ] **Step 3: Run the full automated gate**
+- [x] **Step 3: Run the full automated gate**
 
 Run:
 

@@ -1,4 +1,6 @@
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { promisify } from "node:util";
 
 import { expect, test, type Page } from "@playwright/test";
 
@@ -16,6 +18,90 @@ const PNG_BASE64 =
 const PNG_BYTES = Buffer.from(PNG_BASE64, "base64");
 const PNG_SHA = createHash("sha256").update(PNG_BYTES).digest("hex");
 const OCR_MARKDOWN = "Synthetic Xiaohongshu OCR excerpt.";
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const execFileAsync = promisify(execFile);
+
+function requireUuid(value: string, label: string) {
+  if (!UUID_PATTERN.test(value)) {
+    throw new Error(`${label} is not a UUID`);
+  }
+  return value;
+}
+
+async function execLocalPostgres(sql: string) {
+  await execFileAsync(
+    "docker",
+    [
+      "exec",
+      "-i",
+      "supabase_db_recall-ai",
+      "psql",
+      "-U",
+      "postgres",
+      "-d",
+      "postgres",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-c",
+      sql,
+    ],
+    { timeout: 15_000 },
+  );
+}
+
+async function completeNormalizeJob(ownerUserId: string, sourceVersionId: string) {
+  await execLocalPostgres(`
+    update public.processing_jobs
+    set
+      status = 'complete',
+      completed_at = now(),
+      locked_by = null,
+      lease_expires_at = null,
+      updated_at = now()
+    where owner_user_id = '${requireUuid(ownerUserId, "ownerUserId")}'::uuid
+      and source_version_id = '${requireUuid(sourceVersionId, "sourceVersionId")}'::uuid
+      and job_type = 'normalize_source';
+  `);
+}
+
+async function insertOcrJob(input: {
+  ownerUserId: string;
+  spaceId: string;
+  sourceVersionId: string;
+  status: "complete" | "failed";
+  failureReason?: string;
+}) {
+  const jobId = crypto.randomUUID();
+  const failureSql =
+    input.status === "failed"
+      ? `'${(input.failureReason ?? "provider timeout").replaceAll("'", "''")}'`
+      : "null";
+  const completedSql = input.status === "complete" ? "now()" : "null";
+  await execLocalPostgres(`
+    insert into public.processing_jobs (
+      id,
+      owner_user_id,
+      space_id,
+      source_version_id,
+      job_type,
+      status,
+      failure_reason,
+      completed_at
+    )
+    values (
+      '${jobId}'::uuid,
+      '${requireUuid(input.ownerUserId, "ownerUserId")}'::uuid,
+      '${requireUuid(input.spaceId, "spaceId")}'::uuid,
+      '${requireUuid(input.sourceVersionId, "sourceVersionId")}'::uuid,
+      'ocr_assets',
+      '${input.status}',
+      ${failureSql},
+      ${completedSql}
+    );
+  `);
+  return jobId;
+}
 
 type JsonResponse = {
   status: number;
@@ -232,19 +318,12 @@ test("account A sees Xiaohongshu OCR evidence while account B cannot", async ({
     const captured = await captureXiaohongshuNote(page, "合成小红书 OCR 成功");
     const owned = await loadOwnedCapture(owner.id, captured.sourceItemId);
     const now = new Date().toISOString();
-    const ocrJob = await restAsService("processing_jobs", {
-      method: "POST",
-      body: {
-        owner_user_id: owner.id,
-        space_id: owned.sourceItem.space_id,
-        source_version_id: owned.version.id,
-        job_type: "ocr_assets",
-        status: "complete",
-        completed_at: now,
-      },
+    const ocrJobId = await insertOcrJob({
+      ownerUserId: owner.id,
+      spaceId: owned.sourceItem.space_id,
+      sourceVersionId: owned.version.id,
+      status: "complete",
     });
-    expect(ocrJob.status, JSON.stringify(ocrJob.body)).toBe(201);
-    const ocrJobId = (ocrJob.body as Array<{ id: string }>)[0]!.id;
     const run = await restAsService("processing_runs", {
       method: "POST",
       body: {
@@ -293,7 +372,7 @@ test("account A sees Xiaohongshu OCR evidence while account B cannot", async ({
 
     await page.goto(`/captures/${captured.sourceItemId}`);
     await expect(page.getByText("图片识别完成")).toBeVisible();
-    await expect(page.getByText(OCR_MARKDOWN)).toBeVisible();
+    await expect(page.locator("pre").filter({ hasText: OCR_MARKDOWN })).toBeVisible();
     await expect(page.getByText("bbox 0.1, 0.1, 0.5, 0.3")).toBeVisible();
     await expect(page.getByRole("img", { name: "xhs-image-1.png" })).toBeVisible();
 
@@ -326,32 +405,22 @@ test("mixed complete normalize and failed OCR stays visible as an OCR failure", 
     await signInSyntheticUser(page, owner.email);
     const captured = await captureXiaohongshuNote(page, "合成小红书 OCR 失败");
     const owned = await loadOwnedCapture(owner.id, captured.sourceItemId);
-    const now = new Date().toISOString();
-    await restAsService("processing_jobs", {
-      method: "PATCH",
-      query: `?owner_user_id=eq.${owner.id}&job_type=eq.normalize_source`,
-      body: { status: "complete", completed_at: now },
+    await completeNormalizeJob(owner.id, owned.version.id);
+    await insertOcrJob({
+      ownerUserId: owner.id,
+      spaceId: owned.sourceItem.space_id,
+      sourceVersionId: owned.version.id,
+      status: "failed",
+      failureReason: "provider timeout",
     });
-    const ocrJob = await restAsService("processing_jobs", {
-      method: "POST",
-      body: {
-        owner_user_id: owner.id,
-        space_id: owned.sourceItem.space_id,
-        source_version_id: owned.version.id,
-        job_type: "ocr_assets",
-        status: "failed",
-        failure_reason: "provider timeout",
-      },
-    });
-    expect(ocrJob.status, JSON.stringify(ocrJob.body)).toBe(201);
 
     await page.goto("/exceptions");
-    await expect(page.getByText("图片识别失败")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "图片识别失败" })).toBeVisible();
     await expect(page.getByText("原图和正文已安全保存")).toBeVisible();
     await expect(page.getByRole("link", { name: "查看已保存内容" })).toBeVisible();
 
     await page.goto(`/captures/${captured.sourceItemId}`);
-    await expect(page.getByText("图片识别失败")).toBeVisible();
+    await expect(page.getByText("图片识别失败").first()).toBeVisible();
     await expect(page.getByRole("img", { name: "xhs-image-1.png" })).toBeVisible();
 
     await page.context().clearCookies();
